@@ -29,15 +29,6 @@ import { registerOnce, unregister, type CaptureBinding } from './listener-lifecy
 /** Web traffic only. An extension always sees requests for its own `chrome-extension://` pages. */
 const WEB_TRAFFIC = { urls: ['http://*/*', 'https://*/*'] };
 
-/**
- * What a surface sends to force the batch out before reading the store.
- *
- * A popup or a side panel opening is the moment the store is about to be read, and one batch
- * delay's worth of entries may still be queued in the worker. Sending this first makes a report
- * show the request the user just watched happen, rather than the one before it.
- */
-export const FLUSH_MESSAGE = 'vigie:flush';
-
 export const assembler = new RequestAssembler();
 
 /** Hands a finished request to the write path, which decides whether it is in scope. */

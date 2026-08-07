@@ -13,10 +13,10 @@ import { isRelayMessage } from '@/capture/console/bridge';
 import { applyConsoleCaptureScope } from '@/capture/console/registration';
 import { storeRelayedCapture } from '@/capture/console/store';
 import { eraseCapturedDataFor } from '@/capture/erase-domain-data';
-import { FLUSH_MESSAGE, flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
+import { flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
 import { isWatchedUrl } from '@/storage/scope';
 import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
-import { setCaptureScope } from '@/storage/write';
+import { FLUSH_MESSAGE, setCaptureScope } from '@/storage/write';
 
 /**
  * Service worker. Orchestration only: it owns the scope and hands every capture layer its turn.
@@ -29,6 +29,11 @@ import { setCaptureScope } from '@/storage/write';
  * events the content script relays — and the phase 2 measurement probe, which counts events and
  * permission changes into `storage.session`. The probe is not capture; it is what the popup reads
  * today and what the end-to-end suite asserts on, and phase 8 retires it with the popup.
+ *
+ * The phase 6 storage figures are not a third counter: they are read straight off the store by
+ * whoever asks (`storage/metrics.ts`). The worker's only part in them is `FLUSH_MESSAGE`, which
+ * hands over what is still queued so a reading is taken on the whole capture and not on the
+ * capture minus one batch.
  */
 
 // Web traffic only: an extension always sees requests for its own `chrome-extension://` resources,

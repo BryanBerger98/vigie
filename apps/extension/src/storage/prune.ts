@@ -1,4 +1,5 @@
 import { db } from './db';
+import { estimateQuota, type QuotaEstimate } from './metrics';
 
 /**
  * The rolling window: everything older than an hour goes, and it goes on the write path.
@@ -9,7 +10,14 @@ import { db } from './db';
  * the only moment the store is known to be growing.
  */
 
-/** The window the product promises. One hour of context, no more. */
+/**
+ * The window the product promises. One hour of context, no more.
+ *
+ * Phase 6 weighed it rather than assumed it (`measure-storage.md`): an entry costs about 800 bytes
+ * stored, so an hour of sustained traffic at a thousand entries a minute is roughly 49 MB against
+ * a quota measured in gigabytes. The hour is affordable by three orders of magnitude; the constant
+ * stands on a measurement, not on a hope.
+ */
 export const RETENTION_MS = 60 * 60 * 1000;
 
 /**
@@ -18,6 +26,10 @@ export const RETENTION_MS = 60 * 60 * 1000;
  * Below this, the window is exactly an hour. Above it, entries are dropped oldest-first until the
  * store is back under the mark — the window shrinks, and that has to be visible rather than
  * inferred from a report that turns out shorter than announced (`spec.md:23`).
+ *
+ * The margin measured in phase 6 makes this path unreachable under any traffic a person produces.
+ * It is kept because the quota is the browser's to decide: it is shared with everything else the
+ * profile stores, and a disk running out moves it without warning.
  */
 export const QUOTA_PRESSURE_RATIO = 0.9;
 
@@ -52,27 +64,6 @@ export const EMPTY_STORAGE_STATE: StorageState = {
   quotaBytes: null,
   shrunkAt: null,
 };
-
-interface QuotaEstimate {
-  usage: number | null;
-  quota: number | null;
-}
-
-/**
- * `navigator.storage` is present in a service worker but not in a unit-test environment, and a
- * browser may answer with neither figure. An unknown quota is never treated as a saturated one:
- * silently shrinking the window on a guess is worse than keeping the promised hour.
- */
-async function estimateQuota(): Promise<QuotaEstimate> {
-  const storage = globalThis.navigator?.storage;
-  if (!storage?.estimate) return { usage: null, quota: null };
-  try {
-    const { usage, quota } = await storage.estimate();
-    return { usage: usage ?? null, quota: quota ?? null };
-  } catch {
-    return { usage: null, quota: null };
-  }
-}
 
 function isSaturated({ usage, quota }: QuotaEstimate): boolean {
   if (usage === null || quota === null || quota === 0) return false;

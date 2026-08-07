@@ -39,13 +39,29 @@ export type WriteOutcome = 'queued' | 'out-of-scope' | 'no-tab';
  * one IndexedDB transaction each would make the write path the bottleneck of the capture.
  *
  * The threshold is deliberately low. Whatever sits in this array dies with the service worker,
- * so the batch is a latency optimisation, never a buffer the capture depends on. Phase 6 measures
- * an hour of real traffic and settles the number.
+ * so the batch is a latency optimisation, never a buffer the capture depends on.
+ *
+ * Kept at 50 after phase 6 measured both regimes it has to hold up in (`measure-storage.md`).
+ * Under ordinary traffic the size threshold is never reached and the delay is what flushes; under
+ * a page firing a thousand requests as fast as it can, the capture costs the page 0.26 to 0.37 ms
+ * per request. Neither regime is anywhere near a threshold worth moving the number for.
  */
 export const BATCH_SIZE = 50;
 
 /** How long a partial batch may wait. Short: the worker can be terminated at any moment. */
 export const BATCH_DELAY_MS = 250;
+
+/**
+ * What a surface sends the worker to force the batch out before reading the store.
+ *
+ * A popup, a side panel or a storage reading opening is the moment the store is about to be read,
+ * and one batch delay's worth of entries may still be queued in the worker. Sending this first
+ * makes a report show the request the user just watched happen, rather than the one before it.
+ *
+ * It lives here rather than with the network listeners because the queue does: a reader that only
+ * wants the store drained should not have to import the capture layer to say so.
+ */
+export const FLUSH_MESSAGE = 'vigie:flush';
 
 let scope: readonly string[] = [];
 let queue: NewEntry[] = [];

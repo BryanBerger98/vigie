@@ -34,6 +34,18 @@ export interface TestSite {
    */
   openNoisy(context: BrowserContext): Promise<Page>;
   /**
+   * Opens a page that fires `requests` fetches and as many console lines, and waits for it to be
+   * done. What phase 6 needs and no other route provides: enough entries, on the real write path,
+   * for the store's cost per entry to be a measurement rather than a rounding error.
+   *
+   * `weight` decides what each request carries. A capture entry is mostly its URL and its headers,
+   * so the same count of requests can cost wildly different bytes: `light` is a bare JSON fetch,
+   * `heavy` is what an authenticated application actually sends — a bearer token, a correlation
+   * header, cookies coming back, a long query string. Measuring both brackets the real figure
+   * instead of pinning it to whichever one the harness happened to emit.
+   */
+  openBurst(context: BrowserContext, requests: number, weight?: BurstWeight): Promise<Page>;
+  /**
    * The same page, behind a strict `Content-Security-Policy`.
    *
    * Worth its own route because the capture stopped depending on a `<script>` tag it appends
@@ -56,6 +68,69 @@ export const STRICT_PATH = '/strict';
 
 /** The external form of the noisy script, since a strict policy forbids the inline one. */
 const NOISY_SCRIPT_PATH = '/noisy.js';
+
+/** The page that produces traffic in bulk, so a volume measurement has something to weigh. */
+export const BURST_PATH = '/burst';
+
+/** How much each burst request carries. See `openBurst`. */
+export type BurstWeight = 'light' | 'heavy';
+
+/** Marker the burst page sets once every request has come back. */
+const BURST_DONE = '__vigieBurstDone';
+
+/**
+ * The burst page. Requests go out in small waves rather than all at once: a few hundred parallel
+ * fetches against a single-threaded Node server measure the server's accept queue, not the
+ * extension. Each response carries a payload of a realistic size, and each request is paired with
+ * a console line, so the mix resembles what an application produces.
+ *
+ * The heavy variant sends what a logged-in single-page application sends on every call. The token
+ * is a plausible length rather than a real one; nothing here authenticates anything.
+ */
+function burstPage(count: number, weight: BurstWeight): string {
+  const heavy = weight === 'heavy';
+  const headers = heavy
+    ? `{
+        authorization: 'Bearer ' + 'e30.' + 'A'.repeat(720) + '.sig',
+        'x-correlation-id': '8f14e45f-ceea-467a-9b0c-' + String(n).padStart(12, '0'),
+        'x-client-build': '2026.8.1+e2e.measurement.harness',
+        'content-type': 'application/json',
+      }`
+    : '{}';
+  const query = heavy
+    ? `'/burst-asset?heavy=1&n=' + n + '&fields=id,name,status,owner,updatedAt&filter=' + encodeURIComponent('{"status":["open","pending"],"since":"2026-08-01"}')`
+    : `'/burst-asset?n=' + n`;
+  const line = heavy
+    ? `console.log('vigie-e2e burst', n, { index: n, note: 'a line an application would write', payload: { id: n, owner: 'measurement-harness', tags: ['burst', 'heavy', 'phase-6'], trace: 'x'.repeat(200) } })`
+    : `console.log('vigie-e2e burst', n, { index: n, note: 'a line an application would write' })`;
+
+  return `<!doctype html><title>burst</title><p>burst</p><script>
+(async () => {
+  const WAVE = 20;
+  for (let sent = 0; sent < ${count}; sent += WAVE) {
+    const wave = [];
+    for (let i = 0; i < WAVE && sent + i < ${count}; i += 1) {
+      const n = sent + i;
+      ${line};
+      wave.push(fetch(${query}, { headers: ${headers} }).then((response) => response.text()));
+    }
+    await Promise.all(wave);
+  }
+  globalThis.${BURST_DONE} = true;
+})();
+</script>`;
+}
+
+/** What the heavy route answers with, on top of the payload: what a real backend sets. */
+const HEAVY_RESPONSE_HEADERS = {
+  'set-cookie': `session=${'s'.repeat(180)}; Path=/; HttpOnly; SameSite=Lax`,
+  'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+  'x-request-id': '8f14e45f-ceea-467a-9b0c-6a0f8f14e45fceea',
+  'x-served-by': 'measurement-harness/edge-node-07.eu-west-3.internal',
+  'x-ratelimit-limit': '5000',
+  'x-ratelimit-remaining': '4993',
+  'strict-transport-security': 'max-age=63072000; includeSubDomains; preload',
+};
 
 /**
  * What the noisy page emits, verbatim. Exported so a spec asserts on the text rather than on a
@@ -113,6 +188,23 @@ export async function startTestSite(): Promise<TestSite> {
       );
       return;
     }
+    if (request.url?.startsWith(`${BURST_PATH}?`)) {
+      const parameters = new URL(request.url, 'http://localhost').searchParams;
+      const count = Number(parameters.get('n') ?? 100);
+      const weight: BurstWeight = parameters.get('weight') === 'heavy' ? 'heavy' : 'light';
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(burstPage(count, weight));
+      return;
+    }
+    if (request.url?.startsWith('/burst-asset')) {
+      const heavy = request.url.includes('heavy=1');
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        ...(heavy ? HEAVY_RESPONSE_HEADERS : {}),
+      });
+      response.end(JSON.stringify({ ok: true, payload: 'x'.repeat(512) }));
+      return;
+    }
     if (request.url === NOISY_SCRIPT_PATH) {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end(NOISY_SCRIPT);
@@ -150,6 +242,19 @@ export async function startTestSite(): Promise<TestSite> {
     async openNoisy(context) {
       const page = await context.newPage();
       await page.goto(`http://127.0.0.1:${port}${NOISY_PATH}`, { waitUntil: 'load' });
+      return page;
+    },
+
+    async openBurst(context, requests, weight = 'light') {
+      const page = await context.newPage();
+      await page.goto(`http://127.0.0.1:${port}${BURST_PATH}?n=${requests}&weight=${weight}`, {
+        waitUntil: 'load',
+      });
+      await page.waitForFunction(
+        (marker) => (globalThis as Record<string, unknown>)[marker] === true,
+        BURST_DONE,
+        { timeout: 120_000 },
+      );
       return page;
     },
 
