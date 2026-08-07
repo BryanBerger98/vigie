@@ -65,6 +65,34 @@ async function readMeasurement(context: BrowserContext, extensionId: string): Pr
   return state as MeasurementState;
 }
 
+/**
+ * The same reading, once it has stopped moving.
+ *
+ * A visit does not end when `load` fires: the favicon request, and whatever the page started late,
+ * are delivered afterwards. Reading straight after the navigation charges them to the *next* visit,
+ * which is enough to make an exact count of events per visit disagree with itself. Any test that
+ * compares two counts rather than a threshold has to wait for the traffic to have drained.
+ */
+async function settledMeasurement(
+  context: BrowserContext,
+  extensionId: string,
+): Promise<MeasurementState> {
+  let previous = -1;
+  await expect
+    .poll(
+      async () => {
+        const current = (await readMeasurement(context, extensionId)).networkEvents;
+        const settled = current === previous;
+        previous = current;
+        return settled;
+      },
+      { intervals: [250, 250, 250, 500, 500, 1000] },
+    )
+    .toBe(true);
+
+  return readMeasurement(context, extensionId);
+}
+
 test('no network event is recorded while host access is withheld', async ({ context, extensionId }) => {
   const control = await openSiteAccessControl(context, extensionId);
   expect(await setHostAccess(control, extensionId, 'ON_CLICK')).toBe('ok');
@@ -112,7 +140,7 @@ test('revoking host access stops delivery on that same listener', async ({ conte
   const control = await openSiteAccessControl(context, extensionId);
 
   await site.visit(context);
-  const granted = await readMeasurement(context, extensionId);
+  const granted = await settledMeasurement(context, extensionId);
   expect(granted.networkEvents).toBeGreaterThan(0);
 
   expect(await setHostAccess(control, extensionId, 'ON_CLICK')).toBe('ok');
@@ -129,28 +157,41 @@ test('re-registering on every permission change does not stack listeners', async
 }) => {
   const control = await openSiteAccessControl(context, extensionId);
 
+  /** Events the background counted for one visit, once the traffic has drained. */
+  const visitCost = async (): Promise<number> => {
+    const before = await settledMeasurement(context, extensionId);
+    await site.visit(context);
+    const after = await settledMeasurement(context, extensionId);
+    return after.networkEvents - before.networkEvents;
+  };
+
+  // The profile starts on the variant's required permission, so this first visit is delivered and
+  // measures what one visit costs with the binding applied exactly once.
+  const baseline = await visitCost();
+  expect(baseline).toBeGreaterThan(0);
+
   // The background re-applies its capture binding on `permissions.onAdded` and `onRemoved`.
-  // Three changes therefore mean four `addListener` calls on the same event; a request counted
-  // once per visit is what proves `registerOnce` deduplicates in the real browser.
-  for (const access of ['ON_CLICK', 'ON_ALL_SITES', 'ON_CLICK'] as const) {
+  // Four changes therefore mean five `addListener` calls on the same event.
+  //
+  // Each change is waited for before the next is asked. Driving them back to back leaves Chrome
+  // free to collapse two settings into one notification, and the test would then measure a binding
+  // applied fewer times than it believes — which is exactly the thing under test.
+  let changes = 0;
+  for (const access of ['ON_CLICK', 'ON_ALL_SITES', 'ON_CLICK', 'ON_ALL_SITES'] as const) {
     expect(await setHostAccess(control, extensionId, access)).toBe('ok');
+    changes += 1;
+    await expect
+      .poll(async () => (await readMeasurement(context, extensionId)).permissionChanges.length)
+      .toBe(changes);
   }
-  await expect
-    .poll(async () => (await readMeasurement(context, extensionId)).permissionChanges.length)
-    .toBe(3);
 
-  expect(await setHostAccess(control, extensionId, 'ON_ALL_SITES')).toBe('ok');
-
-  const before = await readMeasurement(context, extensionId);
-  await site.visit(context);
-  const afterFirst = await readMeasurement(context, extensionId);
-  await site.visit(context);
-  const afterSecond = await readMeasurement(context, extensionId);
-
-  const firstVisit = afterFirst.networkEvents - before.networkEvents;
-  const secondVisit = afterSecond.networkEvents - afterFirst.networkEvents;
-  expect(firstVisit).toBeGreaterThan(0);
-  expect(secondVisit).toBe(firstVisit);
+  // A bound rather than an equality. Two visits of the same page do not cost the same number of
+  // requests — the favicon is fetched on one and served from cache on the next — so an exact match
+  // fails for a reason that has nothing to do with listeners. Stacking is not a ±1 effect: five
+  // registrations would count every request five times, which this bound cannot survive.
+  const afterChurn = await visitCost();
+  expect(afterChurn).toBeGreaterThan(0);
+  expect(afterChurn).toBeLessThan(baseline * 2);
 });
 
 /**

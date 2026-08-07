@@ -18,11 +18,25 @@ export interface TestSite {
   host: string;
   /** Navigates a throwaway tab to the site and waits for the sub-resource to have loaded. */
   visit(context: BrowserContext): Promise<void>;
+  /**
+   * Navigates to a route the server kills mid-answer, so the browser reports a transport failure
+   * rather than a status code. That is the only way to reach `onErrorOccurred` from a run that
+   * controls both ends: an HTTP 500 is a perfectly successful request as far as `webRequest` is
+   * concerned, and a bad hostname would depend on the resolver of whoever runs the suite.
+   */
+  visitFailing(context: BrowserContext): Promise<void>;
   close(): Promise<void>;
 }
 
+/** The route the server refuses to answer. Exported so a spec can assert on the URL it stored. */
+export const FAILING_PATH = '/dropped';
+
 export async function startTestSite(): Promise<TestSite> {
   const server: Server = createServer((request, response) => {
+    if (request.url === FAILING_PATH) {
+      request.socket.destroy();
+      return;
+    }
     if (request.url?.endsWith('.js')) {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end('globalThis.__vigieAsset = true;');
@@ -42,6 +56,13 @@ export async function startTestSite(): Promise<TestSite> {
     async visit(context) {
       const page = await context.newPage();
       await page.goto(`http://127.0.0.1:${port}`, { waitUntil: 'load' });
+      await page.close();
+    },
+
+    async visitFailing(context) {
+      const page = await context.newPage();
+      // The navigation is expected to throw: the point of the route is that it never answers.
+      await page.goto(`http://127.0.0.1:${port}${FAILING_PATH}`).catch(() => undefined);
       await page.close();
     },
 

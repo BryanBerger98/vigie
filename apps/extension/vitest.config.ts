@@ -8,8 +8,11 @@ import { WxtVitest } from 'wxt/testing/vitest-plugin';
  *
  * Only the storage surfaces are actually implemented by the fake. Anything else — `permissions`
  * above all — throws unless the test spies on it, which is the intended way to state what the
- * browser is supposed to answer.
+ * browser is supposed to answer. IndexedDB is not part of it either; `vitest.setup.ts` brings it.
  */
 export default defineConfig({
   plugins: [WxtVitest()],
+  test: {
+    setupFiles: ['./vitest.setup.ts'],
+  },
 });

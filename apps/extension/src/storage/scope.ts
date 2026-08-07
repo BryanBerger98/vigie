@@ -109,22 +109,42 @@ function hostIsWithin(host: string, domain: string): boolean {
 }
 
 /**
- * Whether `url` is traffic the user asked to capture.
+ * Which watched domain covers `url`, or `null` when none does.
+ *
+ * The answer is the domain rather than a boolean because every stored entry is stamped with it:
+ * that stamp is what the erasure of a removed domain deletes by, and reading it back off the URL
+ * at erasure time would let a change of the matching rules orphan entries written under the old
+ * one. The longest match wins, so watching both `example.com` and `api.example.com` stamps an
+ * `api.example.com` request under the more specific of the two.
  *
  * The port plays no part: a watched domain covers every port on it, which is what the granted
  * match pattern does too, and what a developer running the same site on 3000 and 8080 expects.
  */
-export function isWatchedUrl(url: string, watchedDomains: readonly string[]): boolean {
-  if (watchedDomains.length === 0) return false;
+export function watchedDomainFor(
+  url: string,
+  watchedDomains: readonly string[],
+): string | null {
+  if (watchedDomains.length === 0) return null;
 
   let host: string;
   try {
     const parsed = new URL(url);
-    if (!CAPTURED_PROTOCOLS.has(parsed.protocol)) return false;
+    if (!CAPTURED_PROTOCOLS.has(parsed.protocol)) return null;
     host = normalizeHost(parsed.hostname);
   } catch {
-    return false;
+    return null;
   }
 
-  return watchedDomains.some((domain) => hostIsWithin(host, normalizeHost(domain)));
+  let match: string | null = null;
+  for (const candidate of watchedDomains) {
+    const domain = normalizeHost(candidate);
+    if (!hostIsWithin(host, domain)) continue;
+    if (match === null || domain.length > match.length) match = domain;
+  }
+  return match;
+}
+
+/** Whether `url` is traffic the user asked to capture. */
+export function isWatchedUrl(url: string, watchedDomains: readonly string[]): boolean {
+  return watchedDomainFor(url, watchedDomains) !== null;
 }

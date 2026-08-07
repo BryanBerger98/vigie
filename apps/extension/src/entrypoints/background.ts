@@ -9,8 +9,11 @@ import {
   type CaptureBinding,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { eraseCapturedDataFor } from '@/capture/erase-domain-data';
+import { FLUSH_MESSAGE, flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
 import { isWatchedUrl } from '@/storage/scope';
 import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
+import { setCaptureScope } from '@/storage/write';
 
 /**
  * Service worker. Orchestration only — capture layers register here from phase 4 onward.
@@ -91,20 +94,29 @@ export default defineBackground(() => {
   }));
 
   networkProbe.apply();
+  networkCapture.apply();
 
   // Both halves of the scope, followed independently. The list decides what the extension writes
   // down; the permission decides what the browser hands it in the first place. A domain added
   // has to start capturing without a restart, so neither may be read once and cached for good.
-  const reloadWatchedDomains = async () => {
-    watchedDomains = await readWatchedDomains();
-    console.info('[vigie] watching %s', watchedDomains.join(', ') || '(nothing)');
+  const applyScope = (domains: string[]) => {
+    watchedDomains = domains;
+    setCaptureScope(domains);
+    console.info('[vigie] watching %s', domains.join(', ') || '(nothing)');
   };
 
-  void reloadWatchedDomains();
+  void readWatchedDomains().then(applyScope);
   onWatchedDomainsChanged((domains) => {
-    watchedDomains = domains;
-    console.info('[vigie] watching %s', domains.join(', ') || '(nothing)');
+    // The removal flow already erased what it dropped, from the page the user clicked in. This
+    // erases it again, from the worker that owns the write queue, so an entry queued microseconds
+    // before the removal cannot land behind it.
+    const dropped = watchedDomains.filter((domain) => !domains.includes(domain));
+    applyScope(domains);
+    for (const domain of dropped) {
+      void eraseCapturedDataFor(domain);
+    }
     networkProbe.apply();
+    networkCapture.apply();
   });
 
   followHostPermissions(browser.permissions, networkProbe, (change, permissions) => {
@@ -114,5 +126,18 @@ export default defineBackground(() => {
       ...state,
       permissionChanges: [...state.permissionChanges, { change, origins, at: Date.now() }],
     }));
+    networkCapture.apply();
+  });
+
+  // A tab closing is the last chance to write what its requests produced; anything still batched
+  // would otherwise wait for traffic that will never come. The surfaces that read the store ask
+  // for the same flush through `vigie:flush`, so a report never omits the last few requests.
+  browser.tabs.onRemoved.addListener(() => void flushNetworkCapture());
+  // `sendResponse` and `return true`, not a returned promise: Chrome only supports the callback
+  // form, and a promise here would answer `undefined` before the batch had been written.
+  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message !== FLUSH_MESSAGE) return false;
+    void flushNetworkCapture().then(() => sendResponse(true));
+    return true;
   });
 });
