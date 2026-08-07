@@ -9,6 +9,14 @@ const UNPACKED_BUILD = fileURLToPath(
   new URL('../../apps/extension/.output/chrome-mv3', import.meta.url),
 );
 
+interface ExtensionOptions {
+  /**
+   * Unpacked build to load. Defaults to the shipped one; a spec overrides it with `test.use`
+   * when it needs a build whose manifest differs — see `optional-host-permission.spec.ts`.
+   */
+  extensionPath: string;
+}
+
 interface ExtensionFixtures {
   /** Persistent context running on a throwaway profile with the unpacked build loaded. */
   context: BrowserContext;
@@ -21,18 +29,17 @@ interface ExtensionFixtures {
  * previous run's IndexedDB, watched-domain list and consent state over, which is exactly what
  * makes an extension suite non-deterministic.
  */
-export const test = base.extend<ExtensionFixtures>({
-  // Playwright reads the fixture's dependencies from the destructuring pattern and rejects any
-  // other parameter form, so the empty pattern is required rather than sloppy.
-  // eslint-disable-next-line no-empty-pattern
-  context: async ({}, use) => {
+export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
+  extensionPath: [UNPACKED_BUILD, { option: true }],
+
+  context: async ({ extensionPath }, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), 'vigie-e2e-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
       // Extensions do not load in the headless shell; the full Chromium build is required.
       channel: 'chromium',
       args: [
-        `--disable-extensions-except=${UNPACKED_BUILD}`,
-        `--load-extension=${UNPACKED_BUILD}`,
+        `--disable-extensions-except=${extensionPath}`,
+        `--load-extension=${extensionPath}`,
       ],
     });
 
