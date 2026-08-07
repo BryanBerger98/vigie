@@ -11,7 +11,7 @@ import type { StoredEntry } from '@/storage/db';
  * identifies it.
  *
  * The detail is the report's own content, laid out for a screen rather than for a paste
- * (`export/markdown.ts:104`). Nothing is summarised there: headers come out whole, because the
+ * (`export/markdown.ts:194`). Nothing is summarised there: headers come out whole, because the
  * header a reader was looking for is the one a summary would have dropped.
  *
  * `<details>` rather than a piece of state: the browser already owns open-and-closed, keyboard
@@ -106,7 +106,7 @@ function NetworkDetail({ entry }: { entry: NetworkEntry }) {
       <Headers term="response headers" headers={entry.responseHeaders} />
       {/*
         Stated on every single request, exactly as the report states it: this is the absence a
-        reader is most likely to mistake for an empty response (`export/markdown.ts:113`).
+        reader is most likely to mistake for an empty response (`export/markdown.ts:203`).
       */}
       <Line term="response body">not available — webRequest never exposes one</Line>
     </>

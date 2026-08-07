@@ -257,9 +257,9 @@ test('the report names the window, the domain and the tab, and declares its gaps
   const { bundle, markdown } = await requestExport(options, tabId, 15);
 
   expect(markdown).toContain(`# Vigie report — ${site.host}`);
-  expect(markdown).toContain(`Subject: ${site.host}, tab ${tabId}`);
-  expect(markdown).toContain(`URL: ${site.origin}/noisy`);
-  expect(markdown).toContain('Window: 15 min requested,');
+  expect(markdown).toContain(`| Subject | ${site.host}, tab ${tabId} |`);
+  expect(markdown).toContain(`| URL | ${site.origin}/noisy |`);
+  expect(markdown).toContain('| Window | 15 min requested,');
 
   const kinds = new Set(bundle!.entries.map((entry) => entry.kind));
   expect(kinds.has('network')).toBe(true);
@@ -273,7 +273,7 @@ test('the report names the window, the domain and the tab, and declares its gaps
   const requests = bundle!.entries.filter((entry) => entry.kind === 'network').length;
   expect(markdown).toContain('## What this report does not contain');
   expect(markdown).toContain('Response bodies are not included.');
-  expect(markdown!.split('response body: not available').length - 1).toBe(requests);
+  expect(markdown!.split('Response body: not available.').length - 1).toBe(requests);
 });
 
 /**

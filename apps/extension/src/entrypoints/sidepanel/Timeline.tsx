@@ -9,7 +9,7 @@ import { WindowEdge } from './WindowEdge';
  *
  * One list rather than three sections, for the same reason the report is one thread — the log line
  * that precedes a failed request is the one that explains it, and two sections put them pages apart
- * (`export/markdown.ts:19`). No filter either: sorting is forbidden at export
+ * (`export/markdown.ts:24`). No filter either: sorting is forbidden at export
  * (`spec.md:14`), and a filter here would let a reader conclude from an absence the export does not
  * share, which is two truths about the same window.
  *
