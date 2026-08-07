@@ -9,6 +9,9 @@ import {
   type CaptureBinding,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { isRelayMessage } from '@/capture/console/bridge';
+import { applyConsoleCaptureScope } from '@/capture/console/registration';
+import { storeRelayedCapture } from '@/capture/console/store';
 import { eraseCapturedDataFor } from '@/capture/erase-domain-data';
 import { FLUSH_MESSAGE, flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
 import { isWatchedUrl } from '@/storage/scope';
@@ -16,15 +19,16 @@ import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-d
 import { setCaptureScope } from '@/storage/write';
 
 /**
- * Service worker. Orchestration only — capture layers register here from phase 4 onward.
+ * Service worker. Orchestration only: it owns the scope and hands every capture layer its turn.
  *
  * MV3 terminates it after roughly 30 seconds idle and drops every global, so nothing durable
  * may live in this module scope. Listener registration has to stay top-level: it is what makes
  * the browser wake the worker back up.
  *
- * What runs here now is phase 2 measurement, not capture. It counts `webRequest` events on every
- * URL and records every host-permission change, so the answer to "does a runtime grant start
- * delivering events" comes from a reading rather than an inference. Phase 4 replaces it.
+ * Two things run side by side here. The capture — `webRequest` into the store, and the page
+ * events the content script relays — and the phase 2 measurement probe, which counts events and
+ * permission changes into `storage.session`. The probe is not capture; it is what the popup reads
+ * today and what the end-to-end suite asserts on, and phase 8 retires it with the popup.
  */
 
 // Web traffic only: an extension always sees requests for its own `chrome-extension://` resources,
@@ -102,6 +106,9 @@ export default defineBackground(() => {
   const applyScope = (domains: string[]) => {
     watchedDomains = domains;
     setCaptureScope(domains);
+    // The console capture is a registration rather than a filter, so it has to be pushed to the
+    // browser every time the list moves — including at a cold start, where nothing else would.
+    void applyConsoleCaptureScope(domains);
     console.info('[vigie] watching %s', domains.join(', ') || '(nothing)');
   };
 
@@ -135,9 +142,20 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener(() => void flushNetworkCapture());
   // `sendResponse` and `return true`, not a returned promise: Chrome only supports the callback
   // form, and a promise here would answer `undefined` before the batch had been written.
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message !== FLUSH_MESSAGE) return false;
-    void flushNetworkCapture().then(() => sendResponse(true));
-    return true;
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message === FLUSH_MESSAGE) {
+      void flushNetworkCapture().then(() => sendResponse(true));
+      return true;
+    }
+
+    // A page event relayed by the content script. Answered synchronously — the content script
+    // only awaits the acknowledgement to know the worker was awake, never the write itself.
+    if (isRelayMessage(message)) {
+      storeRelayedCapture(message.payload, sender);
+      sendResponse(true);
+      return false;
+    }
+
+    return false;
   });
 });

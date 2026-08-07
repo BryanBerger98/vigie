@@ -33,6 +33,43 @@ export interface ReportGap {
   statement: string;
 }
 
+/**
+ * The sentence each gap is rendered as. Written here rather than in the renderer, so the wording a
+ * reader trusts is versioned with the contract and cannot drift between two surfaces.
+ *
+ * Each one names what is missing *and* why, because a reader who does not know the cause cannot
+ * tell a limit of the tool from a symptom of their bug — which is the mistake these lines exist to
+ * prevent. `capture-started-after-page-load` is the answer to the open question at `spec.md:24`:
+ * a page already open when its domain was added carries no earlier context, and says so.
+ */
+export const GAP_STATEMENTS: Record<GapKind, string> = {
+  'response-bodies-unavailable':
+    'Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.',
+  'browser-messages-out-of-reach':
+    'Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.',
+  'capture-started-after-page-load':
+    'Capture began after this page had loaded, because its domain was added or the extension was installed while the tab was already open. Nothing emitted before that point exists; reload the page to cover a full load.',
+  'window-shrunk-by-quota':
+    'The window covered is shorter than the one requested: storage pressure forced the oldest entries out before the hour was up.',
+};
+
+/** A gap with its canonical wording. The only way a report should ever build one. */
+export function reportGap(kind: GapKind): ReportGap {
+  return { kind, statement: GAP_STATEMENTS[kind] };
+}
+
+/**
+ * The gaps that hold for every report this version produces, whatever the capture observed.
+ *
+ * They are structural: no response body will ever be available, and no browser-generated message
+ * will ever be captured without `chrome.debugger`. Stating them unconditionally is the point —
+ * a reader must know what they cannot see before drawing a conclusion from an absence.
+ */
+export const STRUCTURAL_GAPS: readonly GapKind[] = [
+  'response-bodies-unavailable',
+  'browser-messages-out-of-reach',
+];
+
 export interface ReportWindow {
   /** Depth the user asked for, before the one-hour ceiling and before what is actually held. */
   requestedDepthMinutes: ExportDepthMinutes;
