@@ -1,6 +1,6 @@
 ---
 objective: "La popup ne porte plus que l'export — un geste rejoue le palier courant, un geste de plus atteint les trois autres — et le rapport remis est un document Markdown structuré dont un lecteur atteint les anomalies sans le parcourir en entier."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Vigie — refonte du geste d'export et du rapport
