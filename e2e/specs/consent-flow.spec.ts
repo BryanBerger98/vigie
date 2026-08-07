@@ -146,7 +146,7 @@ test('the popup shows the gate instead of itself while the agreement is missing'
   // Not "hidden behind the gate" but absent: a depth button would export a window that was never
   // captured, and a scope line would announce a capture that is not happening.
   await expect(popup.getByTestId('scope-status')).toHaveCount(0);
-  await expect(popup.getByTestId('export-15')).toHaveCount(0);
+  await expect(popup.getByTestId('export-run')).toHaveCount(0);
   await expect(popup.getByTestId('open-options')).toHaveCount(0);
 });
 

@@ -162,8 +162,8 @@ test('a domain never designated leaves nothing stored and nothing to export', as
   // Nothing to export either, and the popup says so by offering the one action that resolves it.
   const popup = await openPopup(context, extensionId);
   await expect(popup.getByTestId('scope-status')).toHaveAttribute('data-state', 'out-of-scope');
-  await expect(popup.getByTestId('export-5')).toHaveCount(0);
-  await expect(popup.getByTestId('export-60')).toHaveCount(0);
+  await expect(popup.getByTestId('export-run')).toHaveCount(0);
+  await expect(popup.getByTestId('export-menu')).toHaveCount(0);
 
   const tabId = await tabIdFor(options, `${site.origin}/noisy`);
   const { bundle } = await requestExport(options, tabId, 60);
@@ -222,12 +222,16 @@ test('a depth and a click, and the report is on the clipboard', async ({ context
   await expect(popup.locator('input, textarea, select')).toHaveCount(0);
 
   // All four depths, reachable from the same surface with no screen in between (`spec.md:11`).
+  await popup.getByTestId('export-menu').click();
   for (const depth of [5, 15, 30, 60]) {
     await expect(popup.getByTestId(`export-${depth}`)).toBeVisible();
   }
+  await popup.keyboard.press('Escape');
 
-  // "aucune étape ne s'intercale": one click, and the next thing that happens is the copy.
-  await popup.getByTestId('export-5').click();
+  // "aucune étape ne s'intercale": one click, and the next thing that happens is the copy. The
+  // depth is on the button before it is pressed, so choosing one is not a step either.
+  await expect(popup.getByTestId('export-run')).toContainText('Export 5 min');
+  await popup.getByTestId('export-run').click();
   await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
 });
 

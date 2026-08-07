@@ -77,7 +77,7 @@ async function watch(options: Page, domain: string): Promise<void> {
 async function capturingPopup(
   context: BrowserContext,
   extensionId: string,
-): Promise<{ options: Page; noisy: Page; popup: Page }> {
+): Promise<{ options: Page; noisy: Page; popup: Page; tabId: number }> {
   const options = await openOptions(context, extensionId);
   await watch(options, site.host);
 
@@ -89,7 +89,34 @@ async function capturingPopup(
   const popup = await openPopup(context, extensionId);
   await expect(popup.getByTestId('scope-status')).toHaveAttribute('data-state', 'capturing');
 
-  return { options, noisy, popup };
+  // The subject tab, read off the store rather than guessed: it is the only web tab of the window,
+  // so everything the capture wrote came from it.
+  const captured = await readCapturedEntries(options);
+
+  return { options, noisy, popup, tabId: captured[0]!.tabId };
+}
+
+/**
+ * A past the run cannot live through, written straight into the store.
+ *
+ * Which depths the popup offers is measured on the oldest entry the store holds, so a run that has
+ * been capturing for four seconds can only ever reach the shallowest tier. Everything about a
+ * remembered depth surviving, or failing to, needs a store deeper than the run itself.
+ */
+function seedPast(options: Page, tabId: number, ageMs: number, path: string): Promise<void> {
+  return seedCapturedEntry(options, {
+    kind: 'network',
+    domain: site.host,
+    tabId,
+    timestamp: Date.now() - ageMs,
+    requestId: `seed${path.replaceAll('/', '-')}`,
+    url: `${site.origin}${path}`,
+    method: 'GET',
+    outcome: 'completed',
+    statusCode: 200,
+    resourceType: 'xmlhttprequest',
+    responseBody: 'unavailable',
+  });
 }
 
 test('names the tab out of scope and offers only the one action that resolves it', async ({
@@ -106,9 +133,10 @@ test('names the tab out of scope and offers only the one action that resolves it
   await expect(popup.getByTestId('scope-detail')).toContainText(site.host);
   await expect(popup.getByTestId('scope-watch-domain')).toContainText(site.host);
 
-  // "et rien d'autre": no depth can be clicked on a tab whose past was never captured.
-  await expect(popup.getByTestId('export-5')).toHaveCount(0);
-  await expect(popup.getByTestId('export-60')).toHaveCount(0);
+  // "et rien d'autre": nothing exports on a tab whose past was never captured — neither the
+  // button that would run it nor the caret that would pick another depth for it.
+  await expect(popup.getByTestId('export-run')).toHaveCount(0);
+  await expect(popup.getByTestId('export-menu')).toHaveCount(0);
 });
 
 test('hands the domain over to the settings, already filled in and one click from watched', async ({
@@ -142,57 +170,122 @@ test('says it is capturing, and reaches the clipboard on one click', async ({
   await expect(popup.getByTestId('scope-detail')).toContainText(site.host);
   await expect(popup.getByTestId('tab-context')).toContainText('entries on this tab');
 
-  await popup.getByTestId('export-5').click();
+  // Nothing to pick first: the button already says what it exports, and clicking it is the export.
+  await expect(popup.getByTestId('export-run')).toContainText('Export 5 min');
+  await popup.getByTestId('export-run').click();
 
   await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
   await expect(popup.getByTestId('copy-retry')).toHaveCount(0);
 });
 
-test('says why a depth cannot be clicked instead of greying it out in silence', async ({
+test('says why a depth cannot be picked instead of greying it out in silence', async ({
   context,
   extensionId,
 }) => {
   // A store seconds old: the shallowest depth still answers, the deeper ones have nothing to add.
   const { popup } = await capturingPopup(context, extensionId);
 
-  await expect(popup.getByTestId('export-5')).toBeEnabled();
-  await expect(popup.getByTestId('export-60')).toBeDisabled();
+  await popup.getByTestId('export-menu').click();
+
+  await expect(popup.getByTestId('export-5')).toHaveAttribute('data-enabled', 'true');
+  await expect(popup.getByTestId('export-60')).toHaveAttribute('data-enabled', 'false');
+  // Written under the tier, not hung off a tooltip: a disabled item takes no hover.
   await expect(popup.getByTestId('export-60')).toHaveAttribute('data-reason', /needs 30 min/);
-  await expect(popup.getByTestId('depth-notice')).toContainText('does not reach back that far yet');
+  await expect(popup.getByTestId('export-60')).toContainText('needs 30 min of capture');
+});
+
+test('opens on the depth of the last export rather than asking again', async ({
+  context,
+  extensionId,
+}) => {
+  const { options, tabId } = await capturingPopup(context, extensionId);
+  await seedPast(options, tabId, 20 * MINUTE, '/twenty-minutes-ago');
+
+  // Reopened rather than reloaded: the popup reads the store and the remembered depth on mount.
+  const first = await openPopup(context, extensionId);
+  await expect(first.getByTestId('export-run')).toContainText('Export 5 min');
+
+  await first.getByTestId('export-menu').click();
+  await first.getByTestId('export-15').click();
+  await expect(first.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+
+  // The label follows the export that just happened, without waiting for a reopen.
+  await expect(first.getByTestId('export-run')).toContainText('Export 15 min');
+
+  const second = await openPopup(context, extensionId);
+  await expect(second.getByTestId('export-run')).toContainText('Export 15 min');
+});
+
+test('falls back to the deepest depth still reachable when the remembered one is not', async ({
+  context,
+  extensionId,
+}) => {
+  const { options, tabId } = await capturingPopup(context, extensionId);
+  await seedPast(options, tabId, 40 * MINUTE, '/forty-minutes-back');
+
+  const deep = await openPopup(context, extensionId);
+  await deep.getByTestId('export-menu').click();
+  await deep.getByTestId('export-60').click();
+  await expect(deep.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+
+  // The store loses its depth under the popup: the user erases what was captured, then browses a
+  // little. Sixty minutes is now a tier nothing can honour, and it was the remembered one.
+  await options.getByTestId('purge-store').click();
+  await expect(options.getByTestId('stored-empty')).toBeVisible();
+  await seedPast(options, tabId, 20 * MINUTE, '/twenty-minutes-back');
+
+  const shallow = await openPopup(context, extensionId);
+  await expect(shallow.getByTestId('export-run')).toContainText('Export 30 min');
+});
+
+test('exports the depth the arrow keys reached, with no pointer anywhere', async ({
+  context,
+  extensionId,
+}) => {
+  const { options, tabId } = await capturingPopup(context, extensionId);
+  await seedPast(options, tabId, 20 * MINUTE, '/twenty-minutes-by-keyboard');
+
+  const popup = await openPopup(context, extensionId);
+
+  await popup.getByTestId('export-menu').focus();
+  await popup.keyboard.press('Enter');
+
+  // Enter on the caret opens the menu on its first tier; each arrow moves one down, and the tiers
+  // nothing can honour are skipped rather than focused into a dead end.
+  //
+  // Every step is asserted rather than only the last one, and not for the sake of detail: the menu
+  // moves focus on a task of its own rather than inside the key handler, so two presses sent within
+  // the same millisecond are both measured against the tier the first one started from and land
+  // together on the second tier. A hand cannot press that fast; a driver can. Waiting on each move
+  // states the walk and makes it deterministic at the same time.
+  await expect(popup.getByTestId('export-5')).toBeFocused();
+  await popup.keyboard.press('ArrowDown');
+  await expect(popup.getByTestId('export-15')).toBeFocused();
+  await popup.keyboard.press('ArrowDown');
+  await expect(popup.getByTestId('export-30')).toBeFocused();
+
+  await popup.keyboard.press('Enter');
+
+  await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+  await expect(popup.getByTestId('export-run')).toContainText('Export 30 min');
 });
 
 test('announces the depth it delivered when the capture is shorter than the one asked for', async ({
   context,
   extensionId,
 }) => {
-  const { options } = await capturingPopup(context, extensionId);
-
-  // The subject tab, read off the store rather than guessed: it is the only web tab of the window,
-  // so everything the capture wrote came from it.
-  const captured = await readCapturedEntries(options);
-  const subjectTabId = captured[0]!.tabId;
+  const { options, tabId } = await capturingPopup(context, extensionId);
 
   // Forty minutes of past, seeded: a run cannot browse for forty minutes, and the depth the report
   // announces is only observable against entries older than the click.
-  await seedCapturedEntry(options, {
-    kind: 'network',
-    domain: site.host,
-    tabId: subjectTabId,
-    timestamp: Date.now() - 40 * MINUTE,
-    requestId: 'seed-forty-minutes-ago',
-    url: `${site.origin}/forty-minutes-ago`,
-    method: 'GET',
-    outcome: 'completed',
-    statusCode: 200,
-    resourceType: 'xmlhttprequest',
-    responseBody: 'unavailable',
-  });
+  await seedPast(options, tabId, 40 * MINUTE, '/forty-minutes-ago');
 
   // Reopened rather than reloaded: the popup reads the store on mount, and the seeding happened
   // behind the back of the one already open.
   const popup = await openPopup(context, extensionId);
 
-  await expect(popup.getByTestId('export-60')).toBeEnabled();
+  await popup.getByTestId('export-menu').click();
+  await expect(popup.getByTestId('export-60')).toHaveAttribute('data-enabled', 'true');
   await popup.getByTestId('export-60').click();
 
   await expect(popup.getByTestId('export-status')).toContainText(/not the 60 min asked/, {
@@ -231,7 +324,7 @@ test('shows a refused clipboard rather than letting it pass for a copy', async (
     navigator.clipboard.writeText = () => Promise.reject(new Error('clipboard blocked by policy'));
   });
 
-  await popup.getByTestId('export-5').click();
+  await popup.getByTestId('export-run').click();
 
   await expect(popup.getByTestId('export-status')).toContainText(
     'Report ready but not copied: clipboard blocked by policy',

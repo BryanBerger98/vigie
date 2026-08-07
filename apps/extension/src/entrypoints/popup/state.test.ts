@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { RETENTION_MS } from '@/storage/prune';
 
 import {
+  DEFAULT_EXPORT_DEPTH_MINUTES,
   copyAcknowledgement,
   depthAvailability,
-  depthNotice,
+  resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
   type PopupFacts,
@@ -118,15 +119,23 @@ describe('depthAvailability', () => {
   });
 });
 
-describe('depthNotice', () => {
-  it('says nothing when every tier is available', () => {
-    expect(depthNotice(depthAvailability(60))).toBeNull();
+describe('resolveCurrentDepth', () => {
+  it('opens on the shallowest tier before anything has ever been exported', () => {
+    expect(resolveCurrentDepth(null, depthAvailability(60))).toBe(DEFAULT_EXPORT_DEPTH_MINUTES);
+    expect(DEFAULT_EXPORT_DEPTH_MINUTES).toBe(5);
   });
 
-  it('names the tiers that cannot be clicked', () => {
-    expect(depthNotice(depthAvailability(0))).toBe(
-      '15 min and 30 min and 60 min unavailable: the capture does not reach back that far yet.',
-    );
+  it('takes the remembered tier back as it is while the store can honour it', () => {
+    expect(resolveCurrentDepth(30, depthAvailability(60))).toBe(30);
+  });
+
+  // A purge, or a browser restarted minutes ago: the habit is out of reach, not forgotten.
+  it('falls back to the deepest tier still reachable when the remembered one is not', () => {
+    expect(resolveCurrentDepth(60, depthAvailability(20))).toBe(30);
+  });
+
+  it('lands on the shallowest tier when the store holds nothing at all', () => {
+    expect(resolveCurrentDepth(60, depthAvailability(0))).toBe(5);
   });
 });
 

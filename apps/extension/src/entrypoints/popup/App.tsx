@@ -21,14 +21,16 @@ import { FLUSH_MESSAGE } from '@/storage/write';
 import { Button } from '@/ui/components/button';
 
 import { CopyFeedback } from './CopyFeedback';
-import { DepthButtons } from './DepthButtons';
+import { ExportButton } from './ExportButton';
 import { ScopeStatus } from './ScopeStatus';
 import { TabContextLine } from './TabContextLine';
+import { readLastDepth, writeLastDepth } from './last-depth';
 import { resolveSubjectTab } from './subject-tab';
 import {
   MS_PER_MINUTE,
   copyAcknowledgement,
   depthAvailability,
+  resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
   type PopupFacts,
@@ -56,11 +58,12 @@ import {
  */
 
 /** What the acknowledgement shows before anything has been clicked. */
-const IDLE_FEEDBACK = 'Pick a depth. The report goes straight to the clipboard.';
+const IDLE_FEEDBACK = 'One click, and the report goes straight to the clipboard.';
 
 export default function App() {
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [facts, setFacts] = useState<PopupFacts | null>(null);
+  const [rememberedDepth, setRememberedDepth] = useState<ExportDepthMinutes | null>(null);
   const [feedback, setFeedback] = useState<string>(IDLE_FEEDBACK);
   const [retryDepth, setRetryDepth] = useState<ExportDepthMinutes | null>(null);
   const [busy, setBusy] = useState(false);
@@ -103,8 +106,15 @@ export default function App() {
     };
   }, []);
 
+  /**
+   * One pass, one render. The remembered depth is read alongside the facts rather than in an effect
+   * of its own: a second pass would land after the first paint, and the button's label would
+   * announce five minutes before flicking to the depth the user actually last used.
+   */
   const refresh = useCallback(async () => {
-    setFacts(await readFacts());
+    const [next, remembered] = await Promise.all([readFacts(), readLastDepth()]);
+    setFacts(next);
+    setRememberedDepth(remembered);
   }, [readFacts]);
 
   // The agreement is read on its own and followed: it is answered in another tab, and the popup
@@ -181,10 +191,17 @@ export default function App() {
     setFeedback(copyAcknowledgement(bundle, outcome));
     setRetryDepth(outcome.ok ? null : depthMinutes);
     setBusy(false);
+
+    // After the clipboard, never before it: this is a preference, and no preference is worth
+    // spending the transient activation the copy runs on. Not awaited either, for the same reason
+    // the state is updated here rather than on the next open — the label follows the click.
+    setRememberedDepth(depthMinutes);
+    void writeLastDepth(depthMinutes);
   }
 
   const status = facts ? scopeStatus(facts) : null;
   const availability = depthAvailability(facts?.coveredMinutes ?? 0);
+  const currentDepth = resolveCurrentDepth(rememberedDepth, availability);
   // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
   // button there would export a window that was never captured (`phase-8.md:112`).
   const exportable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
@@ -225,10 +242,11 @@ export default function App() {
 
       {exportable && facts ? (
         <>
-          <DepthButtons
+          <ExportButton
+            currentDepth={currentDepth}
             availability={availability}
             busy={busy}
-            onPick={(depth) => void exportReport(depth)}
+            onExport={(depth) => void exportReport(depth)}
           />
           <TabContextLine text={tabContextLine(facts)} />
           <CopyFeedback

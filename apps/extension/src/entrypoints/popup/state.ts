@@ -171,13 +171,34 @@ export function depthAvailability(coveredMinutes: number): DepthAvailability[] {
   });
 }
 
-/** The disabled tiers, said out loud under the row rather than greyed out in silence. */
-export function depthNotice(availability: DepthAvailability[]): string | null {
-  const off = availability.filter((depth) => !depth.enabled);
-  if (off.length === 0) return null;
+/** The depth a popup opens on before any export has ever been taken from this profile. */
+export const DEFAULT_EXPORT_DEPTH_MINUTES: ExportDepthMinutes = 5;
 
-  const tiers = off.map((depth) => `${depth.depthMinutes} min`).join(' and ');
-  return `${tiers} unavailable: the capture does not reach back that far yet.`;
+/**
+ * The depth the button offers, before anything is clicked.
+ *
+ * Nothing remembered is the first launch, and it opens on the shallowest tier. Not on the deepest
+ * the store could serve: a first-time user is being shown what the gesture *is*, and the smallest
+ * window is the one whose result they can read in full and judge the product on.
+ *
+ * A remembered depth is reused as-is when the store can still honour it — someone who exports
+ * fifteen-minute windows all day should not re-pick fifteen every time the popup opens.
+ *
+ * When it cannot — a purge, a browser restarted five minutes ago — the fallback is the deepest tier
+ * still honourable rather than the default. The remembered value says the user wants as much
+ * context as they can get, and dropping them to five minutes because thirty is momentarily out of
+ * reach would answer a question they did not ask. The shallowest tier is never disabled
+ * (`state.ts:157`), so this always lands on something.
+ */
+export function resolveCurrentDepth(
+  remembered: ExportDepthMinutes | null,
+  availability: DepthAvailability[],
+): ExportDepthMinutes {
+  if (remembered === null) return DEFAULT_EXPORT_DEPTH_MINUTES;
+
+  const enabled = availability.filter((depth) => depth.enabled);
+  if (enabled.some((depth) => depth.depthMinutes === remembered)) return remembered;
+  return enabled.at(-1)?.depthMinutes ?? DEFAULT_EXPORT_DEPTH_MINUTES;
 }
 
 /**
