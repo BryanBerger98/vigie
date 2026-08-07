@@ -287,6 +287,10 @@ export default function App() {
   // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
   // button there would export a window that was never captured (`phase-8.md:112`).
   const exportable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
+  // The side panel reads one tab's thread, so there has to be a tab. Unlike the export it is
+  // offered out of scope too: the panel is where the absence of capture is explained, and sending
+  // someone to the settings without ever showing them what "watched" looks like is the worse turn.
+  const subject = facts?.subject ?? null;
 
   // The gate, and nothing under it. Every control below acts on a store the write path is refusing
   // to fill, so a scope line here would announce a capture that is not happening and a depth button
@@ -334,18 +338,35 @@ export default function App() {
         </>
       ) : null}
 
-      {/*
-        Only one exit is wired. The side panel of phase 10 is not delivered, and a button leading
-        to a surface that does not exist is worse than no button at all (`phase-8.md:139`).
-      */}
-      <Button
-        data-testid="open-options"
-        variant="outline"
-        size="sm"
-        onClick={() => void browser.runtime.openOptionsPage()}
-      >
-        Settings
-      </Button>
+      <div className="flex gap-2">
+        {subject ? (
+          <Button
+            data-testid="open-sidepanel"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            // No `await` before the call, and no handler of our own around it: Chrome only honours
+            // `sidePanel.open` inside the gesture that triggered it, and a single awaited promise
+            // beforehand already spends that gesture. Everything it needs is read at render time
+            // for that reason. Opening the panel closes the popup, so nothing here reports back.
+            onClick={() => {
+              void browser.sidePanel.open({ tabId: subject.tabId });
+            }}
+          >
+            Inspect live
+          </Button>
+        ) : null}
+
+        <Button
+          data-testid="open-options"
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={() => void browser.runtime.openOptionsPage()}
+        >
+          Settings
+        </Button>
+      </div>
 
       <section className="flex flex-col gap-2 border-t pt-3">
         <h2 className="text-xs font-semibold text-muted-foreground">

@@ -18,7 +18,13 @@ export default defineConfig({
     // which. It is granted only for the tab the user invoked the extension on, only until they
     // navigate away, and Chrome shows no permission warning for it: strictly less than `tabs`,
     // which would disclose every tab's address at all times (`spec.md:11`).
-    permissions: ['storage', 'webRequest', 'scripting', 'activeTab'],
+    //
+    // `sidePanel` opens the live thread. WXT infers it from the entrypoint alone
+    // (`wxt/dist/core/utils/manifest.mjs:176`) and dedupes what it adds, so declaring it here
+    // changes nothing in the output — it is written down because this list is where someone
+    // auditing what Vigie asks the browser for comes to read, and an invisible permission is one
+    // they would have to reverse-engineer from a build. It shows no warning at install.
+    permissions: ['storage', 'webRequest', 'scripting', 'activeTab', 'sidePanel'],
     // No static `host_permissions`: capture scope is granted domain by domain, at the moment
     // the user adds one. The browser then enforces the scope the product claims, instead of
     // our code alone — and the Chrome Web Store "Minimum Permission" clause asks for the same.

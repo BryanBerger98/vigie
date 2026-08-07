@@ -128,8 +128,11 @@ export function scopeStatus(facts: PopupFacts): ScopeStatusView {
 /**
  * A shrink still inside the rolling window. An older one shortened a window that has since been
  * replaced entry by entry, and reporting it would describe a past the store no longer holds.
+ *
+ * Exported because the side panel marks the low edge of its thread with the same distinction, and
+ * two surfaces answering "was this window cut short" differently is two truths (`phase-10.md:126`).
  */
-function isShrunk({ shrunkAt, now }: PopupFacts): boolean {
+export function isShrunk({ shrunkAt, now }: PopupFacts): boolean {
   return shrunkAt !== null && now - shrunkAt < RETENTION_MS;
 }
 
