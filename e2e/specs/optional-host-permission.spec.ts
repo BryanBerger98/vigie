@@ -201,19 +201,14 @@ test('re-registering on every permission change does not stack listeners', async
  * stop were measured and none worked: 90 s of real idleness, `ServiceWorker.stopAllWorkers`, and
  * `Target.closeTarget` on the `service_worker` target. See `measure-permissions.md`, gap G2.
  */
-test('the popup shows a network counter that advances while browsing a permitted domain', async ({
+test('the network counter advances while browsing a permitted domain', async ({
   context,
   extensionId,
 }) => {
   const control = await openSiteAccessControl(context, extensionId);
   expect(await setHostAccess(control, extensionId, 'ON_ALL_SITES')).toBe('ok');
 
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  const counter = popup.getByTestId('measure-network-events');
-  const readCounter = async () => Number(await counter.innerText());
-
-  await expect(counter).toBeVisible();
+  const readCounter = async () => (await readMeasurement(context, extensionId)).networkEvents;
   const before = await readCounter();
 
   await site.visit(context);

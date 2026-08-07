@@ -52,10 +52,53 @@ async function addDomain(options: Page, input: string): Promise<void> {
   await options.getByTestId('add-domain-submit').click();
 }
 
-/** The popup counters, read from the rendered readout rather than from storage. */
-function counters(popup: Page) {
-  const read = (testId: string) => async () => Number(await popup.getByTestId(testId).innerText());
-  return { watched: read('measure-watched-events'), network: read('measure-network-events') };
+const MEASUREMENT_STATE_KEY = 'vigie:measurement';
+
+/** The slice of the background's measurement state this spec reads back. */
+interface MeasurementState {
+  networkEvents: number;
+  watchedEvents: number;
+  permissionChanges: { change: 'added' | 'removed'; origins: string[] }[];
+}
+
+/** The `chrome` surface this spec drives from inside the browser. */
+interface ChromeSurface {
+  storage: { session: { get(key: string): Promise<Record<string, unknown>> } };
+}
+
+const NO_MEASUREMENT: MeasurementState = {
+  networkEvents: 0,
+  watchedEvents: 0,
+  permissionChanges: [],
+};
+
+/**
+ * The worker's counters, read from `chrome.storage.session` through an extension page.
+ *
+ * The popup used to print them and no longer does — it carries the export gesture and nothing
+ * else. The probe itself survives: what this suite needs is the count the background keeps, not
+ * the readout that displayed it. An extension page is the only place the session store is
+ * reachable from; the worker target is off limits, since attaching to it keeps it alive.
+ */
+async function readMeasurement(
+  context: BrowserContext,
+  extensionId: string,
+): Promise<MeasurementState> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  const state = await page.evaluate(async (key) => {
+    const { chrome } = globalThis as unknown as { chrome: ChromeSurface };
+    const stored = await chrome.storage.session.get(key);
+    return stored[key];
+  }, MEASUREMENT_STATE_KEY);
+  await page.close();
+  return (state as MeasurementState | undefined) ?? NO_MEASUREMENT;
+}
+
+function counters(context: BrowserContext, extensionId: string) {
+  const read = (field: 'watchedEvents' | 'networkEvents') => async () =>
+    (await readMeasurement(context, extensionId))[field];
+  return { watched: read('watchedEvents'), network: read('networkEvents') };
 }
 
 test('a fresh profile watches nothing', async ({ context, extensionId }) => {
@@ -94,9 +137,7 @@ test('an input that is not a domain is refused without reaching the browser', as
   await expect(options.getByTestId('add-domain-input')).toHaveValue('not a domain');
 
   // Nothing was asked of the browser, so the background recorded no permission change.
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  await expect(popup.getByTestId('measure-permission-changes')).toHaveText('0');
+  expect((await readMeasurement(context, extensionId)).permissionChanges).toHaveLength(0);
 });
 
 test('a domain added starts being captured without restarting the browser', async ({
@@ -104,9 +145,7 @@ test('a domain added starts being captured without restarting the browser', asyn
   extensionId,
 }) => {
   const options = await openOptions(context, extensionId);
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  const { watched, network } = counters(popup);
+  const { watched, network } = counters(context, extensionId);
 
   // Browsing before the domain is watched: the browser delivers the events, the scope rejects them.
   await site.visit(context);
@@ -123,9 +162,7 @@ test('a domain added starts being captured without restarting the browser', asyn
 
 test('a domain removed stops being captured immediately', async ({ context, extensionId }) => {
   const options = await openOptions(context, extensionId);
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  const { watched, network } = counters(popup);
+  const { watched, network } = counters(context, extensionId);
 
   await addDomain(options, site.host);
   await site.visit(context);

@@ -1,0 +1,48 @@
+---
+objective: "La popup ne porte plus que l'export — un geste rejoue le palier courant, un geste de plus atteint les trois autres — et le rapport remis est un document Markdown structuré dont un lecteur atteint les anomalies sans le parcourir en entier."
+status: in-progress
+---
+
+# Plan: Vigie — refonte du geste d'export et du rapport
+
+## Overview
+
+| Field      | Value                                                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Goal**   | Réduire la surface livrée à ce qui sert l'export, et rendre le rapport exploitable sans lecture intégrale                     |
+| **Source** | [`spec-export-redesign.md`](../2026_08_06_extension-scope/spec-export-redesign.md), issue de [`brainstorm-refonte-export.md`](../2026_08_06_extension-scope/brainstorm-refonte-export.md) |
+
+Cette spec amende [`spec.md`](../2026_08_06_extension-scope/spec.md) sans la remplacer : elle rend caduques `spec.md:11` et `spec.md:13`, referme les questions ouvertes `spec.md:20` et `spec.md:21`. Le plan de la V1 reste au dossier `2026_08_06_extension-scope/` ; celui-ci ne le prolonge pas, il en corrige le produit livré.
+
+Tout le code existe déjà. Aucune phase ne part d'une page blanche : trois modifient, une supprime plus qu'elle n'écrit.
+
+L'ordre n'est pas celui de la spec. Le ménage passe en premier parce qu'il retire 110 lignes de `popup/App.tsx` que les phases 3 et 4 devraient sinon contourner. Le rapport passe en deuxième parce qu'il est la seule vraie difficulté et qu'il ne touche aucune surface — il peut être repris ou repoussé sans bloquer le reste.
+
+## Phases
+
+| #   | Phase                                | File                         |
+| --- | ------------------------------------ | ---------------------------- |
+| 1   | Retrait de l'instrumentation         | [`phase-1.md`](./phase-1.md) |
+| 2   | Le rapport structuré                 | [`phase-2.md`](./phase-2.md) |
+| 3   | Le geste d'export                    | [`phase-3.md`](./phase-3.md) |
+| 4   | La surface — états, thème, en-tête   | [`phase-4.md`](./phase-4.md) |
+
+La phase 2 est indépendante des trois autres : elle ne touche que `src/export/`. Les phases 3 et 4 se suivent obligatoirement, elles modifient le même fichier.
+
+## Resources
+
+| Source                                                                    | Verified                                                                                                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <https://www.npmjs.com/package/lucide-react>                              | `1.30.0` au 2026-08-07. Peer `react ^19` — compatible avec le `19.2.8` du projet (`apps/extension/package.json:21`)                             |
+| <https://www.npmjs.com/package/@radix-ui/react-dropdown-menu>             | `2.1.24` au 2026-08-07. Peers `react`/`react-dom` `^19.0` — compatibles. Aucune dépendance Radix n'existe encore dans le projet                  |
+| <https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy> | La CSP par défaut des `extension_pages` en MV3 est `script-src 'self'; object-src 'self'` — aucune directive `style-src`, donc les styles injectés par Radix ne sont pas restreints. À reconfirmer sur le build en phase 3 |
+
+## Decisions
+
+| Decision                                                                                                          | Why                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Le rapport devient un document Markdown structuré : tableau de cadrage, section par entrée, fences typées, `<details>` | Révoque la décision de `markdown.ts:14-32`, qui gardait le rendu plat pour survivre à une coupure n'importe où. **Risque accepté** : un rapport tronqué au milieu d'un tableau ou d'un `<details>` devient partiellement inexploitable (`spec-export-redesign.md:65`)                        |
+| Une anomalie est un marqueur `[!]` dans le titre de sa section, plus un compte par type dans le tableau de tête       | La spec interdit un index ligne à ligne (`spec-export-redesign.md:40`) mais exige d'atteindre les anomalies sans lecture intégrale (`:22`). Un marqueur greppable dans le titre satisfait les deux, sans redite du contenu. Une section « Failures » séparée a été écartée : elle republie chaque anomalie |
+| `@radix-ui/react-dropdown-menu` entre comme dépendance                                                              | Revient sur la décision de `button.tsx:9-11`, qui avait retiré `asChild` pour éviter Radix. Un menu doit gérer clavier, focus et ARIA ; l'écrire à la main pour un composant qui porte le geste principal du produit est une régression d'accessibilité qu'on ne rattrape pas |
+| L'instrumentation de mesure est supprimée, pas déplacée                                                             | Les réglages portent déjà entrées, octets, âge du plus ancien, ventilation et purge (`StoredData.tsx:73-148`). **Coût assumé** : le protocole de `measure-storage.md` perd son instrument ; une future campagne devra le refaire (`spec-export-redesign.md:37`)                              |
+| Deux paires de tokens `--success` / `--warning`, jamais d'utilitaire `dark:`                                          | La variante `dark:` de `globals.css:11` cible `.dark *` et aucune ligne du code ne pose cette classe. Le seul mécanisme actif est la media query `prefers-color-scheme` de `globals.css:85-107`. Écrire `bg-green-50 dark:bg-green-950` donnerait une tache pâle sur fond sombre |

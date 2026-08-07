@@ -1,14 +1,12 @@
-import type { EntryKind } from '@vigie/contract';
-
 import { db } from './db';
 
 /**
  * What the capture store actually costs, measured rather than estimated.
  *
- * Phase 6 of the plan turns on one question: does an hour of real traffic fit, and does holding it
- * degrade the browsing it observes (`prd.md:95`). Neither is answerable from the code — only from
- * a store that has been running against a real application. This module is the instrument that
- * makes it readable, and it is written to be read by a human during navigation, not by the report.
+ * Two callers, and only two. The settings page reads it to show what is held right now
+ * (`options/StoredData.tsx`), which is how the scope and retention promises are made auditable
+ * instead of believed. The purge reads `estimateQuota` alone, to decide whether the promised hour
+ * still fits the origin's ceiling (`storage/prune.ts:85`).
  *
  * ## Two rules the instrument obeys
  *
@@ -19,22 +17,14 @@ import { db } from './db';
  *   answers for the whole `chrome-extension://` origin, extension files included, so a raw usage
  *   figure carries an unknown constant. The constant is measured once, while the store is empty,
  *   and subtracted from every reading afterwards.
+ *
+ * The readings series this module used to keep, and the projection figures it fed, are gone: the
+ * popup was their only reader and the popup now carries the export and nothing else. The protocol
+ * of `measure-storage.md` loses its instrument with them — a later campaign has to rebuild one.
  */
 
 /** Where the empty-store reading lives, so a reading survives the worker being terminated. */
 export const STORAGE_BASELINE_KEY = 'vigie:storage-baseline';
-
-const MS_PER_MINUTE = 60_000;
-const MINUTES_PER_HOUR = 60;
-
-export interface KindVolume {
-  /** Entries of this kind currently held. */
-  count: number;
-  /** How many of them arrive per minute, over the window the store actually covers. */
-  perMinute: number;
-  /** Bytes attributable to this kind, at the store's mean cost per entry. `null` without a quota. */
-  bytes: number | null;
-}
 
 export interface DomainVolume {
   /** The watched domain the entries were stamped with, never the host they came from. */
@@ -49,11 +39,6 @@ export interface CaptureMetrics {
   takenAt: number;
   entryCount: number;
   /**
-   * Split by kind because they do not shrink the same way: a network entry loses its headers, a
-   * console entry loses its text, and the two decisions have nothing to do with each other.
-   */
-  byKind: Record<EntryKind, KindVolume>;
-  /**
    * Split by watched domain, heaviest first. This is the readout that makes the scope promise
    * auditable rather than believed: a domain nobody designated has no row here, and the settings
    * screen shows the list as it stands (`phase-9.md` task 3).
@@ -61,44 +46,9 @@ export interface CaptureMetrics {
   byDomain: DomainVolume[];
   /** Epoch ms of the oldest entry held, `null` when the store is empty. */
   oldestEntryAt: number | null;
-  /** How much time the store covers. Under an hour it is the whole capture; at an hour, the cap. */
-  coveredMs: number;
-  /** Entries per minute, all kinds, over that same window. */
-  entriesPerMinute: number;
-  /** What the browser attributes to the whole origin, extension files included. */
-  usageBytes: number | null;
-  /** The origin's ceiling, as the browser reports it. */
-  quotaBytes: number | null;
-  /** Usage observed while the store was empty — the constant that is not capture. */
-  baselineBytes: number | null;
-  /** Bytes the entries themselves account for: `usageBytes` minus the baseline. */
+  /** Bytes the entries themselves account for: origin usage minus the baseline. */
   storeBytes: number | null;
-  /** Mean cost of one entry, index overhead included. */
-  bytesPerEntry: number | null;
-  /** What a full hour at the observed rate would occupy. The gauge the ceiling is judged against. */
-  projectedHourBytes: number | null;
-  /** That projection as a fraction of the quota. Above 1, the hour does not fit. */
-  projectedQuotaRatio: number | null;
 }
-
-const EMPTY_VOLUME: KindVolume = { count: 0, perMinute: 0, bytes: null };
-
-export const EMPTY_CAPTURE_METRICS: CaptureMetrics = {
-  takenAt: 0,
-  entryCount: 0,
-  byKind: { network: EMPTY_VOLUME, console: EMPTY_VOLUME, error: EMPTY_VOLUME },
-  byDomain: [],
-  oldestEntryAt: null,
-  coveredMs: 0,
-  entriesPerMinute: 0,
-  usageBytes: null,
-  quotaBytes: null,
-  baselineBytes: null,
-  storeBytes: null,
-  bytesPerEntry: null,
-  projectedHourBytes: null,
-  projectedQuotaRatio: null,
-};
 
 export interface QuotaEstimate {
   usage: number | null;
@@ -145,14 +95,12 @@ async function baseline(entryCount: number, usage: number | null): Promise<numbe
 }
 
 interface EntryTally {
-  counts: Record<EntryKind, number>;
   domains: Map<string, number>;
   total: number;
 }
 
-/** Counts the table by kind and by domain in one pass. Both splits ride the same walk. */
+/** Counts the table and its domain split in one pass. */
 async function countEntries(): Promise<EntryTally> {
-  const counts: Record<EntryKind, number> = { network: 0, console: 0, error: 0 };
   const domains = new Map<string, number>();
   let total = 0;
 
@@ -163,12 +111,10 @@ async function countEntries(): Promise<EntryTally> {
   // it once per domain would be several cursors where this is one.
   await db().entries.each((entry) => {
     total += 1;
-    const kind = entry.kind as EntryKind;
-    if (kind in counts) counts[kind] += 1;
     domains.set(entry.domain, (domains.get(entry.domain) ?? 0) + 1);
   });
 
-  return { counts, domains, total };
+  return { domains, total };
 }
 
 /**
@@ -177,41 +123,25 @@ async function countEntries(): Promise<EntryTally> {
  * `now` is injected so a test can state a window rather than wait for one.
  */
 export async function captureMetrics(now = Date.now()): Promise<CaptureMetrics> {
-  const [{ counts, domains, total }, oldest, estimate] = await Promise.all([
+  const [{ domains, total }, oldest, estimate] = await Promise.all([
     countEntries(),
     db().entries.orderBy('timestamp').first(),
     estimateQuota(),
   ]);
-
-  const oldestEntryAt = oldest?.timestamp ?? null;
-  const coveredMs = oldestEntryAt === null ? 0 : Math.max(0, now - oldestEntryAt);
-  const coveredMinutes = coveredMs / MS_PER_MINUTE;
 
   const baselineBytes = await baseline(total, estimate.usage);
   const storeBytes =
     estimate.usage === null || baselineBytes === null
       ? null
       : Math.max(0, estimate.usage - baselineBytes);
+  // Bytes per domain are the mean entry cost times the count, not a measurement of their own: the
+  // browser attributes storage to an origin, never to a row. Stated here rather than in the readout
+  // so the approximation lives next to the arithmetic that makes it.
   const bytesPerEntry = storeBytes === null || total === 0 ? null : storeBytes / total;
-
-  // A rate needs a window to be a rate. Below one it would divide by a fraction of a minute and
-  // announce a throughput nobody observed, so the first seconds of a capture report zero.
-  const rate = (count: number) => (coveredMinutes >= 1 ? count / coveredMinutes : 0);
-  const entriesPerMinute = rate(total);
-
-  const projectedHourBytes =
-    bytesPerEntry === null || entriesPerMinute === 0
-      ? null
-      : bytesPerEntry * entriesPerMinute * MINUTES_PER_HOUR;
 
   return {
     takenAt: now,
     entryCount: total,
-    byKind: {
-      network: volume(counts.network, rate(counts.network), bytesPerEntry),
-      console: volume(counts.console, rate(counts.console), bytesPerEntry),
-      error: volume(counts.error, rate(counts.error), bytesPerEntry),
-    },
     byDomain: [...domains]
       .map(([domain, count]) => ({
         domain,
@@ -220,94 +150,7 @@ export async function captureMetrics(now = Date.now()): Promise<CaptureMetrics> 
       }))
       // Heaviest first, ties broken alphabetically so two readings of the same store agree.
       .sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain)),
-    oldestEntryAt,
-    coveredMs,
-    entriesPerMinute,
-    usageBytes: estimate.usage,
-    quotaBytes: estimate.quota,
-    baselineBytes,
+    oldestEntryAt: oldest?.timestamp ?? null,
     storeBytes,
-    bytesPerEntry,
-    projectedHourBytes,
-    projectedQuotaRatio:
-      projectedHourBytes === null || estimate.quota === null || estimate.quota === 0
-        ? null
-        : projectedHourBytes / estimate.quota,
   };
-}
-
-/**
- * Bytes per kind are the mean entry cost times the count, not a measurement of their own: the
- * browser attributes storage to an origin, never to a row. Stated here rather than in the readout
- * so the approximation lives next to the arithmetic that makes it.
- */
-function volume(count: number, perMinute: number, bytesPerEntry: number | null): KindVolume {
-  return {
-    count,
-    perMinute,
-    bytes: bytesPerEntry === null ? null : bytesPerEntry * count,
-  };
-}
-
-/** Where the series of readings accumulates while a measurement run is in progress. */
-export const STORAGE_READINGS_KEY = 'vigie:storage-readings';
-
-/**
- * Readings kept. An hour sampled every five minutes is twelve; the cap is there so a forgotten
- * run cannot grow without bound, not because more would be useless.
- */
-export const MAX_READINGS = 240;
-
-/**
- * Appends a reading to the run's series and hands the whole series back.
- *
- * The series exists because task 2.3 of the phase asks for readings at regular intervals over a
- * full hour, and a figure a human retyped from a popup is a figure nobody can audit afterwards.
- * `chrome.storage.local`, not the capture store: a measurement must not be written into the thing
- * it measures.
- */
-export async function recordReading(metrics: CaptureMetrics): Promise<CaptureMetrics[]> {
-  const series = [...(await readReadings()), metrics].slice(-MAX_READINGS);
-  await browser.storage.local.set({ [STORAGE_READINGS_KEY]: series });
-  return series;
-}
-
-export async function readReadings(): Promise<CaptureMetrics[]> {
-  const stored = await browser.storage.local.get(STORAGE_READINGS_KEY);
-  const value = stored[STORAGE_READINGS_KEY];
-  return Array.isArray(value) ? (value as CaptureMetrics[]) : [];
-}
-
-export async function clearReadings(): Promise<void> {
-  await browser.storage.local.remove(STORAGE_READINGS_KEY);
-}
-
-/**
- * The series as a Markdown table, ready to be pasted into the measurement report.
- *
- * Bytes stay raw here on purpose. A readout rounds so a human can read it at a glance; a record
- * that will be re-derived from must not, or the arithmetic done later inherits the rounding.
- */
-export function formatReadings(readings: readonly CaptureMetrics[]): string {
-  const header =
-    '| Relevé | Entrées | Réseau | Console | Erreur | Fenêtre (min) | Entrées/min | Octets stockés | Heure projetée |';
-  const rule = '| --- | --- | --- | --- | --- | --- | --- | --- | --- |';
-  const cell = (value: number | null) => (value === null ? '—' : String(Math.round(value)));
-
-  const rows = readings.map((reading) => {
-    const at = new Date(reading.takenAt).toISOString().slice(11, 19);
-    return [
-      at,
-      reading.entryCount,
-      reading.byKind.network.count,
-      reading.byKind.console.count,
-      reading.byKind.error.count,
-      (reading.coveredMs / MS_PER_MINUTE).toFixed(1),
-      reading.entriesPerMinute.toFixed(1),
-      cell(reading.storeBytes),
-      cell(reading.projectedHourBytes),
-    ].join(' | ');
-  });
-
-  return [header, rule, ...rows.map((row) => `| ${row} |`)].join('\n');
 }
