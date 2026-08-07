@@ -105,6 +105,7 @@ this page does not describe, the wording changes, capture stops, and Vigie asks 
 | `storage` | Holding the capture, the watched domain list and your agreement |
 | `scripting` | Injecting the console and error capture into watched tabs only |
 | `activeTab` | Naming the one tab you opened the popup on, so the report and the offer to watch a site can say which site |
+| `sidePanel` | Opening the panel that shows what is being captured on the tab you are looking at |
 | Host access, per domain, optional | Granted by you one domain at a time, and revocable from `chrome://extensions` at any time |
 
 Host access is deliberately not requested for all sites. A domain you have not designated is a

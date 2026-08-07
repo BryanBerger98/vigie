@@ -8,6 +8,15 @@ export default defineConfig({
     name: 'Vigie',
     description:
       'Captures network traffic, console output and JS errors on the domains you designate, and hands you a Markdown report of the active tab.',
+    // No `version` here on purpose: WXT reads it from `package.json` and only falls back to this
+    // field (`wxt/dist/core/utils/manifest.mjs:33`). Declaring it twice is how a store listing ends
+    // up announcing a version the workspace never built.
+    homepage_url: 'https://github.com/BryanBerger98/vigie',
+    author: { email: 'contact@bryanberger.dev' },
+    // The side panel is a Chrome 114 API and the product's reading surface depends on it. Stated
+    // rather than left to chance: without it the store offers the extension to browsers where
+    // `sidePanel.open` does not exist, and the failure would land on the user as a dead button.
+    minimum_chrome_version: '114',
     // Required at install time. `webRequest` is observational only under MV3, and `scripting`
     // carries no warning of its own — it is bounded by the host permissions actually granted,
     // which is what lets the console capture be registered domain by domain at runtime.

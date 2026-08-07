@@ -15,6 +15,10 @@
     "e2e": {
       "dependsOn": ["@vigie/extension#build"],
       "cache": false
+    },
+    "zip": {
+      "dependsOn": ["^build"],
+      "outputs": [".output/*.zip"]
     }
   }
 }
