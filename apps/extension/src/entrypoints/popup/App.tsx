@@ -5,17 +5,29 @@ import {
 } from '@/capture/network/listener-lifecycle';
 
 /**
+ * Every URL, because the phase 2 measurement is about whether a grant reaches the listener at all,
+ * not about which origins are watched. Per-domain grants arrive with the watch list in phase 3.
+ */
+const MEASURED_ORIGINS = ['*://*/*'];
+
+/**
  * Popup shell. The export surface — four depth buttons, capture status — lands here in phase 8.
  *
  * What it shows now is the phase 2 measurement readout: the network event counter, the worker
  * start count and the host-permission changes. It exists so the measurement can be read without
  * opening DevTools on the service worker, and it goes away when phase 8 fills this in.
  *
+ * The grant and revoke buttons are the only way to drive `permissions.request()` by hand: Chrome
+ * requires a user gesture, and optional host permissions are not exposed on `chrome://extensions`.
+ * They exist for the manual run of the post-termination scenario, which no automation can perform;
+ * phase 3 replaces them with the real per-domain request.
+ *
  * The `data-testid` attributes are the handles the end-to-end suite reads; `popup-root` proves
  * the popup mounted and predates this phase.
  */
 export default function App() {
   const [state, setState] = useState<MeasurementState>(EMPTY_MEASUREMENT_STATE);
+  const [hasHostAccess, setHasHostAccess] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,7 +35,10 @@ export default function App() {
     const read = async () => {
       const stored = await browser.storage.session.get(MEASUREMENT_STATE_KEY);
       const next = stored[MEASUREMENT_STATE_KEY] as MeasurementState | undefined;
-      if (!cancelled) setState(next ?? EMPTY_MEASUREMENT_STATE);
+      const granted = await browser.permissions.contains({ origins: MEASURED_ORIGINS });
+      if (cancelled) return;
+      setState(next ?? EMPTY_MEASUREMENT_STATE);
+      setHasHostAccess(granted);
     };
 
     void read();
@@ -42,6 +57,16 @@ export default function App() {
 
   const lastChange = state.permissionChanges.at(-1);
 
+  // Called straight from the click, never after an `await`: Chrome ties the native prompt to the
+  // user gesture, and any suspension before the call loses it.
+  const requestHostAccess = () => {
+    void browser.permissions.request({ origins: MEASURED_ORIGINS });
+  };
+
+  const dropHostAccess = () => {
+    void browser.permissions.remove({ origins: MEASURED_ORIGINS });
+  };
+
   return (
     <main
       data-testid="popup-root"
@@ -50,6 +75,11 @@ export default function App() {
       <h1 className="text-sm font-semibold">Vigie</h1>
 
       <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">Host access</dt>
+        <dd data-testid="measure-host-access" className="text-right font-mono">
+          {hasHostAccess ? 'granted' : 'withheld'}
+        </dd>
+
         <dt className="text-muted-foreground">Network events</dt>
         <dd data-testid="measure-network-events" className="text-right font-mono tabular-nums">
           {state.networkEvents}
@@ -71,6 +101,27 @@ export default function App() {
           ? `${lastChange.change}: ${lastChange.origins.join(', ') || '(none)'}`
           : 'No host permission granted yet.'}
       </p>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          data-testid="measure-grant"
+          onClick={requestHostAccess}
+          disabled={hasHostAccess}
+          className="flex-1 rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+        >
+          Grant host access
+        </button>
+        <button
+          type="button"
+          data-testid="measure-revoke"
+          onClick={dropHostAccess}
+          disabled={!hasHostAccess}
+          className="flex-1 rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+        >
+          Revoke
+        </button>
+      </div>
     </main>
   );
 }
