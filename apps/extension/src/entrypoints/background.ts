@@ -9,6 +9,8 @@ import {
   type CaptureBinding,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { isWatchedUrl } from '@/storage/scope';
+import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
 
 /**
  * Service worker. Orchestration only — capture layers register here from phase 4 onward.
@@ -45,10 +47,23 @@ function record(change: (state: MeasurementState) => MeasurementState): void {
     });
 }
 
+/**
+ * The watched domains, held in module scope because `webRequest.onCompleted` is synchronous and
+ * cannot await a storage read. MV3 wipes this on every worker stop, so it is reloaded at each
+ * start and kept current by the subscription below.
+ *
+ * The window between a worker start and that first read landing is real: requests arriving in it
+ * are counted as delivered but not as watched. It costs nothing here — this is a counter — and
+ * phase 4 has to answer it properly, since the same window would silently drop captured data.
+ */
+let watchedDomains: string[] = [];
+
 function countCompletedRequest(details: { url: string }): void {
+  const watched = isWatchedUrl(details.url, watchedDomains);
   record((state) => ({
     ...state,
     networkEvents: state.networkEvents + 1,
+    watchedEvents: state.watchedEvents + (watched ? 1 : 0),
     lastEvent: { url: details.url, at: Date.now() },
   }));
 }
@@ -76,6 +91,21 @@ export default defineBackground(() => {
   }));
 
   networkProbe.apply();
+
+  // Both halves of the scope, followed independently. The list decides what the extension writes
+  // down; the permission decides what the browser hands it in the first place. A domain added
+  // has to start capturing without a restart, so neither may be read once and cached for good.
+  const reloadWatchedDomains = async () => {
+    watchedDomains = await readWatchedDomains();
+    console.info('[vigie] watching %s', watchedDomains.join(', ') || '(nothing)');
+  };
+
+  void reloadWatchedDomains();
+  onWatchedDomainsChanged((domains) => {
+    watchedDomains = domains;
+    console.info('[vigie] watching %s', domains.join(', ') || '(nothing)');
+    networkProbe.apply();
+  });
 
   followHostPermissions(browser.permissions, networkProbe, (change, permissions) => {
     const origins = (permissions as { origins?: string[] }).origins ?? [];

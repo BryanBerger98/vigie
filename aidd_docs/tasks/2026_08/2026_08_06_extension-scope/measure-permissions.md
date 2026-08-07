@@ -141,6 +141,20 @@ sites plutôt que bulle de permission optionnelle). Le code de l'extension, le l
 règles de distribution, eux, sont identiques. Le verdict porte sur la distribution, pas sur la
 manière dont l'origine a été accordée.
 
+**Décision, prise en phase 3** : cette variante devient le harnais commun des phases 3 à 11. Elle
+est extraite dans `e2e/fixtures/build-variant.ts`, avec les helpers qui la pilotent
+(`openSiteAccessControl`, `setHostAccess`). Deux conséquences que toute spécification suivante
+doit connaître :
+
+- `permissions.request()` répond `true` sans bulle, puisque l'origine est déjà accordée. Les
+  spécifications couvrent donc la branche **accordée** de l'ajout ; le **refus** se teste en
+  unitaire, où la réponse du navigateur se dicte (`watched-domains.test.ts`).
+- `permissions.remove()` échoue sur une permission requise. Le retrait d'un domaine tolère cet
+  échec, journalise, et poursuit la radiation — sans quoi la variante bloquerait un chemin que le
+  build livré emprunte sans problème.
+
+Le chemin d'octroi réel reste couvert par la recette manuelle de la phase 11.
+
 ### G2 — le service worker ne s'arrête jamais sous Playwright
 
 | Tentative | Résultat |
@@ -178,7 +192,7 @@ la mesure, si. Le filtre définitif de la capture est de toute façon décidé e
 
 | Ce qui est tranché | Ce qui ne l'est pas |
 | --- | --- |
-| Le manifeste garde `optional_host_permissions`, sans `host_permissions` statiques | Le harnais de test des phases 3 à 11, que G1 laisse ouvert |
+| Le manifeste garde `optional_host_permissions`, sans `host_permissions` statiques | — (le harnais des phases 3 à 11 est tranché depuis, voir G1) |
 | Un domaine ajouté capture immédiatement, sans redémarrage | Le filtre de capture définitif (phase 4) |
 | Le réveil du worker restaure la capture | Le dimensionnement du tampon quand le worker ne s'endort pas (phase 4) |
 | `registerOnce` sur `onAdded` / `onRemoved` reste, par précaution | L'écran de consentement (phase 9), inchangé par cette mesure |

@@ -110,7 +110,14 @@ export interface MeasurementState {
    */
   workerStarts: number;
   workerStartedAt: number;
+  /** Every request Chrome dispatched to the extension, whatever the watched list says. */
   networkEvents: number;
+  /**
+   * The subset that also falls inside the watched domains. The two counters are kept apart on
+   * purpose: `networkEvents` says what the browser let through, `watchedEvents` says what the
+   * scope accepted, and phase 3 is precisely about the second barrier being the one that decides.
+   */
+  watchedEvents: number;
   lastEvent: { url: string; at: number } | null;
   permissionChanges: MeasuredPermissionChange[];
 }
@@ -119,6 +126,7 @@ export const EMPTY_MEASUREMENT_STATE: MeasurementState = {
   workerStarts: 0,
   workerStartedAt: 0,
   networkEvents: 0,
+  watchedEvents: 0,
   lastEvent: null,
   permissionChanges: [],
 };
