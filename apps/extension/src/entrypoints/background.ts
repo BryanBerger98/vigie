@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION } from '@vigie/contract';
+import { SCHEMA_VERSION, isExportRequest, type ExportRequest, type ExportResult } from '@vigie/contract';
 
 import {
   EMPTY_MEASUREMENT_STATE,
@@ -14,7 +14,9 @@ import { applyConsoleCaptureScope } from '@/capture/console/registration';
 import { storeRelayedCapture } from '@/capture/console/store';
 import { eraseCapturedDataFor } from '@/capture/erase-domain-data';
 import { flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
-import { isWatchedUrl } from '@/storage/scope';
+import { assembleBundle } from '@/export/bundle';
+import { renderReport } from '@/export/markdown';
+import { isWatchedUrl, watchedDomainFor } from '@/storage/scope';
 import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
 import { FLUSH_MESSAGE, setCaptureScope } from '@/storage/write';
 
@@ -78,6 +80,47 @@ function countCompletedRequest(details: { url: string }): void {
     watchedEvents: state.watchedEvents + (watched ? 1 : 0),
     lastEvent: { url: details.url, at: Date.now() },
   }));
+}
+
+/** The host, when the tab is on no watched domain — a report still has to name its subject. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Serves an export. The worker is the only place this can happen: it owns the write queue, so it
+ * is the only one that can freeze an instant and then guarantee the disk has caught up to it.
+ *
+ * The watched list is read here rather than taken from module scope. A popup can be the very
+ * thing that wakes a terminated worker, and `watchedDomains` is still empty for the few
+ * milliseconds that first read takes — long enough for a report to come out named after nothing.
+ */
+async function serveExport(request: ExportRequest): Promise<ExportResult> {
+  const [tab, domains] = await Promise.all([
+    browser.tabs.get(request.tabId),
+    readWatchedDomains(),
+  ]);
+  const url = tab.url ?? '';
+
+  const bundle = await assembleBundle({
+    tabId: request.tabId,
+    requestedDepthMinutes: request.depthMinutes,
+    subject: {
+      // The stamp the entries carry, so the header names the scope the body was written under.
+      domain: watchedDomainFor(url, domains) ?? hostOf(url),
+      url,
+      title: tab.title,
+    },
+    extensionVersion: browser.runtime.getManifest().version,
+    // Freeze first, then drain: `export/bundle.ts:21` explains why that order and not the other.
+    settle: flushNetworkCapture,
+  });
+
+  return { bundle, markdown: renderReport(bundle) };
 }
 
 /**
@@ -150,6 +193,16 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message === FLUSH_MESSAGE) {
       void flushNetworkCapture().then(() => sendResponse(true));
+      return true;
+    }
+
+    // An export. Failures are answered, not thrown: a rejected promise on this channel reaches
+    // the caller as a bare "message port closed", which tells the user nothing about what broke.
+    if (isExportRequest(message)) {
+      serveExport(message).then(sendResponse, (error: unknown) => {
+        console.error('[vigie] could not serve the export', error);
+        sendResponse({ error: error instanceof Error ? error.message : String(error) });
+      });
       return true;
     }
 

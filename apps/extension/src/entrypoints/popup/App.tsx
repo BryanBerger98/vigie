@@ -1,8 +1,17 @@
 import {
+  EXPORT_DEPTHS_MINUTES,
+  exportRequest,
+  isExportFailure,
+  type ExportDepthMinutes,
+  type ExportResult,
+} from '@vigie/contract';
+
+import {
   EMPTY_MEASUREMENT_STATE,
   MEASUREMENT_STATE_KEY,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { copyToClipboard } from '@/export/clipboard';
 import {
   captureMetrics,
   clearReadings,
@@ -50,6 +59,7 @@ export default function App() {
   const [state, setState] = useState<MeasurementState>(EMPTY_MEASUREMENT_STATE);
   const [metrics, setMetrics] = useState<CaptureMetrics | null>(null);
   const [readings, setReadings] = useState<number>(0);
+  const [exportStatus, setExportStatus] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +121,41 @@ export default function App() {
     setReadings(0);
   }
 
+  /**
+   * One export, from the click to the clipboard.
+   *
+   * The write is the last statement of the handler, and nothing is awaited between it and the
+   * report coming back: `writeText` runs on the transient activation the click granted, and that
+   * activation expires. A slow worker can therefore cost the copy — which is precisely why the
+   * outcome is rendered instead of assumed (`export/clipboard.ts:10`).
+   */
+  async function exportReport(depthMinutes: ExportDepthMinutes): Promise<void> {
+    setExportStatus(`Exporting the last ${depthMinutes} min…`);
+
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id === undefined) {
+      setExportStatus('No active tab to report on.');
+      return;
+    }
+
+    const answer: unknown = await browser.runtime
+      .sendMessage(exportRequest(tab.id, depthMinutes))
+      .catch((error: unknown) => ({ error: String(error) }));
+
+    if (isExportFailure(answer)) {
+      setExportStatus(`Export failed: ${answer.error}`);
+      return;
+    }
+
+    const { bundle, markdown } = answer as ExportResult;
+    const outcome = await copyToClipboard(markdown);
+    setExportStatus(
+      outcome.ok
+        ? `Copied ${bundle.entries.length} entries, ${minutes(bundle.window.coveredDepthMinutes * MS_PER_MINUTE)} covered.`
+        : `Report ready but not copied: ${outcome.reason}`,
+    );
+  }
+
   const lastChange = state.permissionChanges.at(-1);
   const covered = metrics?.coveredMs ?? 0;
 
@@ -148,6 +193,29 @@ export default function App() {
           ? `${lastChange.change}: ${lastChange.origins.join(', ') || '(none)'}`
           : 'No host permission granted yet.'}
       </p>
+
+      <section className="flex flex-col gap-2 border-t pt-2">
+        <h2 className="text-xs font-semibold">Export the active tab</h2>
+
+        <div className="flex gap-2">
+          {EXPORT_DEPTHS_MINUTES.map((depth) => (
+            <Button
+              key={depth}
+              data-testid={`export-${depth}`}
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => void exportReport(depth)}
+            >
+              {`${depth} min`}
+            </Button>
+          ))}
+        </div>
+
+        <p data-testid="export-status" className="text-xs text-muted-foreground">
+          {exportStatus || 'Pick a depth. The report goes to the clipboard.'}
+        </p>
+      </section>
 
       <section className="flex flex-col gap-2 border-t pt-2">
         <h2 className="text-xs font-semibold">Capture store</h2>

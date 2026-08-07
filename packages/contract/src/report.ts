@@ -108,3 +108,58 @@ export interface ReportBundle {
 export function isExportDepth(value: unknown): value is ExportDepthMinutes {
   return EXPORT_DEPTHS_MINUTES.includes(value as ExportDepthMinutes);
 }
+
+/**
+ * What a surface sends to have a report cut, and what comes back.
+ *
+ * This crosses a boundary — a popup or a side panel to the service worker — which is why it is
+ * declared here rather than in the extension. The worker is the one that has to serve it: it owns
+ * the write queue, so it is the only place that can freeze an instant and then guarantee that
+ * everything captured before it has reached the disk.
+ */
+export const EXPORT_MESSAGE = 'vigie:export';
+
+export interface ExportRequest {
+  type: typeof EXPORT_MESSAGE;
+  /** The tab the report is about. An export is always one tab's story (`prd.md`). */
+  tabId: number;
+  depthMinutes: ExportDepthMinutes;
+}
+
+export interface ExportResult {
+  bundle: ReportBundle;
+  /** The rendered report — exactly the text that reaches the clipboard, rendered once. */
+  markdown: string;
+}
+
+/** The failure form. Returned rather than thrown: a message channel cannot carry an exception. */
+export interface ExportFailure {
+  error: string;
+}
+
+export function exportRequest(tabId: number, depthMinutes: ExportDepthMinutes): ExportRequest {
+  return { type: EXPORT_MESSAGE, tabId, depthMinutes };
+}
+
+/**
+ * Validates the whole shape, not just the discriminant. The worker answers any page of the
+ * extension and, through `externally_connectable` in a later version, possibly more than that.
+ */
+export function isExportRequest(value: unknown): value is ExportRequest {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<ExportRequest>;
+  return (
+    candidate.type === EXPORT_MESSAGE &&
+    typeof candidate.tabId === 'number' &&
+    Number.isFinite(candidate.tabId) &&
+    isExportDepth(candidate.depthMinutes)
+  );
+}
+
+export function isExportFailure(value: unknown): value is ExportFailure {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ExportFailure).error === 'string'
+  );
+}
