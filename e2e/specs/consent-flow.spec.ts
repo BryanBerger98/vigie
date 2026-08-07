@@ -147,7 +147,13 @@ test('the popup shows the gate instead of itself while the agreement is missing'
   // captured, and a scope line would announce a capture that is not happening.
   await expect(popup.getByTestId('scope-status')).toHaveCount(0);
   await expect(popup.getByTestId('export-run')).toHaveCount(0);
-  await expect(popup.getByTestId('open-options')).toHaveCount(0);
+  await expect(popup.getByTestId('open-sidepanel')).toHaveCount(0);
+
+  // The header is the exception, and deliberately so: someone landing on the disclosure does not
+  // yet know what this window is, which is the moment the brand and the title matter most. Its
+  // settings button leads to a page that shows the very same gate, so it opens nothing early.
+  await expect(popup.getByTestId('popup-header')).toContainText('Vigie');
+  await expect(popup.getByTestId('open-options')).toBeVisible();
 });
 
 test('the settings show the gate instead of the domain list', async ({ context, extensionId }) => {

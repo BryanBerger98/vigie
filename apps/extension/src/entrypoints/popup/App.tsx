@@ -4,6 +4,7 @@ import {
   type ExportDepthMinutes,
   type ExportResult,
 } from '@vigie/contract';
+import { PanelRight } from 'lucide-react';
 
 import { ConsentRequired } from '@/consent/ConsentRequired';
 import {
@@ -22,6 +23,7 @@ import { Button } from '@/ui/components/button';
 
 import { CopyFeedback } from './CopyFeedback';
 import { ExportButton } from './ExportButton';
+import { PopupHeader } from './PopupHeader';
 import { ScopeStatus } from './ScopeStatus';
 import { TabContextLine } from './TabContextLine';
 import { readLastDepth, writeLastDepth } from './last-depth';
@@ -219,7 +221,7 @@ export default function App() {
         data-testid="popup-root"
         className="flex w-80 flex-col gap-3 bg-background p-4 text-foreground"
       >
-        <h1 className="text-sm font-semibold">Vigie</h1>
+        <PopupHeader />
         <ConsentRequired state={consent} />
       </main>
     );
@@ -230,7 +232,7 @@ export default function App() {
       data-testid="popup-root"
       className="flex w-80 flex-col gap-3 bg-background p-4 text-foreground"
     >
-      <h1 className="text-sm font-semibold">Vigie</h1>
+      <PopupHeader />
 
       {status ? (
         <ScopeStatus status={status} onWatch={watchDomainFromPopup} />
@@ -257,35 +259,26 @@ export default function App() {
         </>
       ) : null}
 
-      <div className="flex gap-2">
-        {subject ? (
-          <Button
-            data-testid="open-sidepanel"
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            // No `await` before the call, and no handler of our own around it: Chrome only honours
-            // `sidePanel.open` inside the gesture that triggered it, and a single awaited promise
-            // beforehand already spends that gesture. Everything it needs is read at render time
-            // for that reason. Opening the panel closes the popup, so nothing here reports back.
-            onClick={() => {
-              void browser.sidePanel.open({ tabId: subject.tabId });
-            }}
-          >
-            Inspect live
-          </Button>
-        ) : null}
-
+      {/* Alone on its line since the settings moved to the header: it is the one exit that belongs
+          to the gesture, and it now reads as one rather than as half a row of chrome. */}
+      {subject ? (
         <Button
-          data-testid="open-options"
+          data-testid="open-sidepanel"
           variant="outline"
           size="sm"
-          className="flex-1"
-          onClick={() => void browser.runtime.openOptionsPage()}
+          className="w-full"
+          // No `await` before the call, and no handler of our own around it: Chrome only honours
+          // `sidePanel.open` inside the gesture that triggered it, and a single awaited promise
+          // beforehand already spends that gesture. Everything it needs is read at render time
+          // for that reason. Opening the panel closes the popup, so nothing here reports back.
+          onClick={() => {
+            void browser.sidePanel.open({ tabId: subject.tabId });
+          }}
         >
-          Settings
+          <PanelRight aria-hidden="true" className="size-4" />
+          Inspect live
         </Button>
-      </div>
+      ) : null}
     </main>
   );
 }

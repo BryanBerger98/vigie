@@ -32,6 +32,17 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+
+  /*
+   * The two states shadcn's palette has no name for. `destructive` already carries "this is wrong",
+   * which left "this is working" and "this still works, but less" sharing it — three states, two
+   * of them indistinguishable.
+   *
+   * No `-foreground` companion on purpose: these are an icon tint, a border and a translucent
+   * background, never a filled surface, so nothing ever needs a contrasting text laid over them.
+   */
+  --success: oklch(0.627 0.194 149.214);
+  --warning: oklch(0.769 0.188 70.08);
 }
 
 .dark {
@@ -54,6 +65,8 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+  --success: oklch(0.723 0.219 149.579);
+  --warning: oklch(0.828 0.189 84.429);
 }
 
 @theme inline {
@@ -77,6 +90,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -103,6 +118,8 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
+    --success: oklch(0.723 0.219 149.579);
+    --warning: oklch(0.828 0.189 84.429);
   }
 }
 

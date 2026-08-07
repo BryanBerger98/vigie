@@ -314,6 +314,49 @@ test('the thread runs in the order the exported report does', async ({ context, 
   expect([...stamps]).toEqual([...stamps].sort((a, b) => a - b));
 });
 
+/**
+ * `phase-4.md:165`, last third — the panel and the popup never tell two stories about one tab.
+ *
+ * The panel renders the popup's own alert rather than restating the four states
+ * (`sidepanel/App.tsx:8`), and this is what holds that import to its promise. Out of scope is the
+ * state worth testing it on: it is the one where a disagreement would be worst, since whichever
+ * surface got it wrong would be claiming a capture that is not happening.
+ */
+test('the panel and the popup announce the same state for the same tab', async ({
+  context,
+  extensionId,
+}) => {
+  const options = await openOptions(context, extensionId);
+  await watch(options, site.host);
+
+  // The same server under a hostname nobody watches, exactly as above: the scope is read from the
+  // tab's address, so whether it answers is beside the point.
+  const stray = await context.newPage();
+  await stray
+    .goto(site.origin.replace('127.0.0.1', 'localhost'), { waitUntil: 'load' })
+    .catch(() => undefined);
+
+  // Both surfaces are extension tabs, so both resolve the most recently accessed web tab of the
+  // window (`popup/subject-tab.ts:51`) — and that is `stray` for either of them.
+  const panel = await openPanel(context, extensionId);
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await expect(popup.getByTestId('popup-root')).toBeVisible();
+
+  const announced = async (surface: Page) => ({
+    state: await surface.getByTestId('scope-status').getAttribute('data-state'),
+    label: (await surface.getByTestId('scope-label').innerText()).trim(),
+  });
+
+  for (const surface of [panel, popup]) {
+    await expect(surface.getByTestId('scope-status')).toHaveAttribute('data-state', 'out-of-scope', {
+      timeout: 20_000,
+    });
+  }
+
+  expect(await announced(panel)).toEqual(await announced(popup));
+});
+
 test('marks the low edge of the thread as a purge, not as an absence', async ({
   context,
   extensionId,

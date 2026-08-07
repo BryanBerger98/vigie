@@ -340,11 +340,27 @@ test('offers both exits, and the settings one reaches a real surface', async ({
 }) => {
   const { options, popup } = await capturingPopup(context, extensionId);
 
-  // The side panel exit exists, and that is all this can state about it: `sidePanel.open` only
-  // works inside a real user gesture on a real toolbar popup, and the panel it opens is browser
+  // The side panel exit exists, and that is all this can state about what it opens: `sidePanel.open`
+  // only works inside a real user gesture on a real toolbar popup, and the panel it opens is browser
   // chrome that Playwright never exposes as a page. What the panel does once open is asserted in
   // `sidepanel-read.spec.ts`, against `sidepanel.html` loaded as an ordinary tab.
-  await expect(popup.getByTestId('open-sidepanel')).toBeVisible();
+  const exit = popup.getByTestId('open-sidepanel');
+  await expect(exit).toBeVisible();
+  await expect(exit.locator('svg')).toHaveCount(1);
+
+  // Alone on its line since the settings moved to the header, and measured rather than assumed: a
+  // `w-full` dropped in a refactor leaves a button that still works and no longer reads as the one
+  // step of the gesture it is. The padding is read off the element instead of restated here.
+  const available = await popup.getByTestId('popup-root').evaluate((node) => {
+    const style = getComputedStyle(node);
+    return (
+      node.getBoundingClientRect().width -
+      Number.parseFloat(style.paddingLeft) -
+      Number.parseFloat(style.paddingRight)
+    );
+  });
+  const box = await exit.boundingBox();
+  expect(Math.abs(box!.width - available)).toBeLessThan(1);
 
   // The settings tab the setup left open would be focused rather than opened again, and a focus is
   // not evidence that the button reaches a surface.
