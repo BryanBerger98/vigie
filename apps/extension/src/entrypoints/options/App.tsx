@@ -12,7 +12,17 @@ import { WatchedDomainList } from './WatchedDomainList';
  * behind this page's back: the other surfaces, Chrome's own site-access settings, and a
  * permission prompt answered in another window. Re-reading on every signal costs two API calls
  * and removes a whole class of stale display.
+ *
+ * The page also answers `?domain=`, which is how the popup hands over the site it just offered to
+ * watch. The permission prompt is raised here rather than there because Chrome closes a popup to
+ * show it, taking the code that would store the domain with it (`popup/App.tsx:203`).
  */
+
+/** The domain the popup asked to watch, when the page was opened for that. */
+function requestedDomain(): string {
+  return new URLSearchParams(globalThis.location.search).get('domain') ?? '';
+}
+
 export default function App() {
   const [domains, setDomains] = useState<WatchedDomain[] | null>(null);
 
@@ -64,7 +74,7 @@ export default function App() {
           <WatchedDomainList domains={domains} onRemoved={() => void refresh()} />
         )}
 
-        <AddDomainForm onAdded={() => void refresh()} />
+        <AddDomainForm onAdded={() => void refresh()} initialDomain={requestedDomain()} />
       </section>
     </main>
   );

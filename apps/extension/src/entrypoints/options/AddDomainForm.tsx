@@ -7,6 +7,12 @@ import { Input } from '@/ui/components/input';
 interface AddDomainFormProps {
   /** Called once a domain made it into the list, so the page can read it back. */
   onAdded: () => void;
+  /**
+   * What the field starts with. Filled when the popup handed a domain over: the user asked to
+   * watch a specific site, and retyping it here would be the second half of a request they
+   * already made.
+   */
+  initialDomain?: string;
 }
 
 /**
@@ -16,8 +22,8 @@ interface AddDomainFormProps {
  * where it can be tested without a browser. What is left here is the part that only a screen can
  * do: keep the call inside the gesture, and say out loud which of the three outcomes happened.
  */
-export function AddDomainForm({ onAdded }: AddDomainFormProps) {
-  const [value, setValue] = useState('');
+export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProps) {
+  const [value, setValue] = useState(initialDomain);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 

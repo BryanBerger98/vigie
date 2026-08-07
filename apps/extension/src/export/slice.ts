@@ -69,6 +69,22 @@ export async function readWindow(
   return rows.map(({ id: _id, ...entry }) => entry as CaptureEntry);
 }
 
+/**
+ * How much the store holds for one tab, over the whole rolling window.
+ *
+ * What the popup states before anything is clicked, so an export that would come out empty is
+ * known to be empty first. The bounds are the retention hour rather than an open range: nothing
+ * older survives the purge, and a closed range keeps the query on the same compound index the
+ * slice uses instead of walking the table.
+ */
+export async function countForTab(tabId: number, now: number): Promise<number> {
+  const from = now - MAX_EXPORT_DEPTH_MINUTES * MS_PER_MINUTE;
+  return db()
+    .entries.where('[tabId+timestamp]')
+    .between([tabId, from], [tabId, now], true, true)
+    .count();
+}
+
 /** Epoch ms of the oldest entry the store still holds, all tabs. `null` when it is empty. */
 export async function oldestCaptureAt(): Promise<number | null> {
   const oldest = await db().entries.orderBy('timestamp').first();

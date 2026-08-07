@@ -71,9 +71,9 @@ async function watch(options: Page, domain: string): Promise<void> {
 /**
  * Asks the worker for a report, the way a surface does.
  *
- * Driven from an extension page rather than from the popup: the popup exports whatever tab is
- * active, and under Playwright the popup *is* the active tab. The tab under report is therefore
- * named explicitly, which is also the only shape the side panel of phase 10 can use.
+ * Driven from an extension page rather than from the popup, so the tab under report is named
+ * explicitly and nothing here depends on how a surface resolves it. That resolution and the click
+ * path are covered in `popup-export.spec.ts`; this file is about what the worker cuts.
  */
 function requestExport(page: Page, tabId: number, depthMinutes: number): Promise<ExportAnswer> {
   return page.evaluate(
@@ -309,50 +309,4 @@ test('leaves out the traffic that followed the click', async ({ context, extensi
   expect(later.length).toBeGreaterThan(0);
   expect(later.every((entry) => entry.timestamp > bundle!.window.frozenAt)).toBe(true);
   expect(markdown).not.toContain('after-the-click');
-});
-
-/**
- * The copy, from the popup, on a real click.
- *
- * Asserted through what the popup displays rather than by reading the clipboard back: CDP refuses
- * to grant clipboard permissions to a `chrome-extension://` origin ("Permission can't be granted
- * to opaque origins"), so no page of the suite can read what was written. The displayed outcome is
- * still evidence — the popup only shows a success once `writeText` has resolved, and the failure
- * branch below proves it is not printing that unconditionally.
- *
- * The report itself is about whichever tab is active, and under Playwright that is the popup's own
- * tab. Its contents are therefore not the point here; the copy path is.
- */
-async function openPopup(context: BrowserContext, extensionId: string): Promise<Page> {
-  const page = await context.newPage();
-  await page.goto(`chrome-extension://${extensionId}/popup.html`);
-  await expect(page.getByTestId('popup-root')).toBeVisible();
-  return page;
-}
-
-test('reaches the clipboard from a click in the popup', async ({ context, extensionId }) => {
-  const popup = await openPopup(context, extensionId);
-
-  await popup.getByTestId('export-15').click();
-
-  await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
-});
-
-test('shows a refused clipboard rather than letting it pass for a copy', async ({
-  context,
-  extensionId,
-}) => {
-  const popup = await openPopup(context, extensionId);
-
-  // The refusal a locked-down policy or a lost user activation produces, stated to the page.
-  await popup.evaluate(() => {
-    navigator.clipboard.writeText = () => Promise.reject(new Error('clipboard blocked by policy'));
-  });
-
-  await popup.getByTestId('export-15').click();
-
-  await expect(popup.getByTestId('export-status')).toContainText(
-    'Report ready but not copied: clipboard blocked by policy',
-    { timeout: 15_000 },
-  );
 });

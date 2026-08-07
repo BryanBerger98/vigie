@@ -1,5 +1,4 @@
 import {
-  EXPORT_DEPTHS_MINUTES,
   exportRequest,
   isExportFailure,
   type ExportDepthMinutes,
@@ -12,6 +11,7 @@ import {
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
 import { copyToClipboard } from '@/export/clipboard';
+import { countForTab, oldestCaptureAt } from '@/export/slice';
 import {
   captureMetrics,
   clearReadings,
@@ -20,24 +20,45 @@ import {
   recordReading,
   type CaptureMetrics,
 } from '@/storage/metrics';
-import { RETENTION_MS } from '@/storage/prune';
+import { RETENTION_MS, readStorageState } from '@/storage/prune';
+import { watchedDomainFor } from '@/storage/scope';
+import { hasHostAccess, onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
 import { FLUSH_MESSAGE } from '@/storage/write';
 import { Button } from '@/ui/components/button';
 
-/**
- * Popup shell. The export surface — four depth buttons, capture status — lands here in phase 8.
- *
- * Two provisional readouts share it until then. The phase 2 probe counts what the browser
- * delivered against what the watched list accepted, and polls, because reading a session counter
- * costs nothing. The phase 6 storage readout does not poll: every reading walks the whole capture
- * table, and a poll would put the instrument inside what it measures (`storage/metrics.ts:16`).
- * It is taken on open, and again on demand — which is also what a relevé is.
- *
- * The `data-testid` attributes are the handles the end-to-end suite reads; `popup-root` proves
- * the popup mounted and predates this phase.
- */
+import { CopyFeedback } from './CopyFeedback';
+import { DepthButtons } from './DepthButtons';
+import { ScopeStatus } from './ScopeStatus';
+import { TabContextLine } from './TabContextLine';
+import { resolveSubjectTab } from './subject-tab';
+import {
+  MS_PER_MINUTE,
+  copyAcknowledgement,
+  depthAvailability,
+  scopeStatus,
+  tabContextLine,
+  type PopupFacts,
+} from './state';
 
-const MS_PER_MINUTE = 60_000;
+/**
+ * The popup: the whole gesture of the product, from seeing that a domain is watched to holding
+ * its report. Nothing between the two but one click (`spec.md:13`).
+ *
+ * What could be wrong lives in `state.ts` and is asserted without a browser. What is left here is
+ * what only a surface can do: read the browser, keep the clipboard write inside the click, and
+ * re-read when something behind the popup's back moves the scope.
+ *
+ * ## The instrumentation below the fold
+ *
+ * Two provisional readouts still share this surface: the phase 2 probe, and the phase 6 storage
+ * figures with the readings series `measure-storage.md` records its measurements through. Phase 6
+ * is deliberately still open — the full hour on a named application is the user's to play — and
+ * removing its instrument now would take the documented protocol with it. They sit under an
+ * explicit heading, below every export control, and phase 11 retires them.
+ *
+ * The `data-testid` attributes are the handles the end-to-end suite reads; `popup-root` proves the
+ * popup mounted and predates this phase.
+ */
 
 /** Bytes at a glance. Rounded on purpose: the unrounded figures go to the readings series. */
 function bytes(value: number | null): string {
@@ -47,7 +68,8 @@ function bytes(value: number | null): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function minutes(ms: number): string {
+/** A duration held in milliseconds, as the storage readout prints it. */
+function span(ms: number): string {
   return `${(ms / MS_PER_MINUTE).toFixed(1)} min`;
 }
 
@@ -55,11 +77,77 @@ function percent(ratio: number | null): string {
   return ratio === null ? '—' : `${Math.round(ratio * 100)} %`;
 }
 
+/** What the acknowledgement shows before anything has been clicked. */
+const IDLE_FEEDBACK = 'Pick a depth. The report goes straight to the clipboard.';
+
 export default function App() {
+  const [facts, setFacts] = useState<PopupFacts | null>(null);
+  const [feedback, setFeedback] = useState<string>(IDLE_FEEDBACK);
+  const [retryDepth, setRetryDepth] = useState<ExportDepthMinutes | null>(null);
+  const [busy, setBusy] = useState(false);
+
   const [state, setState] = useState<MeasurementState>(EMPTY_MEASUREMENT_STATE);
   const [metrics, setMetrics] = useState<CaptureMetrics | null>(null);
   const [readings, setReadings] = useState<number>(0);
-  const [exportStatus, setExportStatus] = useState<string>('');
+
+  /**
+   * Everything the surface renders, read in one pass.
+   *
+   * The flush comes first and is not optional. The capture batches its writes, so up to a batch of
+   * entries exist only in the worker's memory — and a popup opened right after some traffic would
+   * otherwise announce "nothing captured on this tab yet" about a tab that has been captured. It
+   * also wakes a terminated worker, which is what the export that follows needs anyway.
+   */
+  const readFacts = useCallback(async (): Promise<PopupFacts> => {
+    await browser.runtime.sendMessage(FLUSH_MESSAGE).catch(() => {
+      // The worker is starting back up. What is on disk is then what the popup describes.
+    });
+
+    const now = Date.now();
+    const [subject, domains] = await Promise.all([resolveSubjectTab(), readWatchedDomains()]);
+    const watchedDomain = subject ? watchedDomainFor(subject.url, domains) : null;
+
+    const [hostAccess, tabEntryCount, oldest, storage] = await Promise.all([
+      watchedDomain ? hasHostAccess(watchedDomain) : Promise.resolve(false),
+      subject ? countForTab(subject.tabId, now) : Promise.resolve(0),
+      oldestCaptureAt(),
+      readStorageState(),
+    ]);
+
+    return {
+      subject,
+      watchedDomain,
+      hostAccess,
+      tabEntryCount,
+      // Measured on the store rather than on the tab, exactly as a report announces it
+      // (`export/slice.ts:86`), and capped at the hour the store is allowed to hold.
+      coveredMinutes:
+        oldest === null ? 0 : Math.min(RETENTION_MS, Math.max(0, now - oldest)) / MS_PER_MINUTE,
+      shrunkAt: storage.shrunkAt,
+      now,
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setFacts(await readFacts());
+  }, [readFacts]);
+
+  useEffect(() => {
+    void refresh();
+
+    // Three things move the scope behind this popup's back: another surface editing the list,
+    // Chrome's own site-access settings, and a permission prompt answered elsewhere.
+    const unsubscribe = onWatchedDomainsChanged(() => void refresh());
+    const onPermissionChange = () => void refresh();
+    browser.permissions.onAdded.addListener(onPermissionChange);
+    browser.permissions.onRemoved.addListener(onPermissionChange);
+
+    return () => {
+      unsubscribe();
+      browser.permissions.onAdded.removeListener(onPermissionChange);
+      browser.permissions.onRemoved.removeListener(onPermissionChange);
+    };
+  }, [refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +210,22 @@ export default function App() {
   }
 
   /**
+   * The out-of-scope exit, and the only one that state offers.
+   *
+   * It hands over to the settings with the domain already filled in rather than requesting the
+   * permission here. Chrome closes a popup when it raises a permission prompt over it, and the
+   * promise chain that would then have to store the domain dies with the document — leaving the
+   * browser granting access to a domain no list mentions. The settings page is a document that
+   * survives its own prompt, and it already owns the whole validate-ask-store sequence
+   * (`storage/watched-domains.ts:81`).
+   */
+  function watchDomainFromPopup(domain: string): void {
+    void browser.tabs.create({
+      url: browser.runtime.getURL(`/options.html?domain=${encodeURIComponent(domain)}`),
+    });
+  }
+
+  /**
    * One export, from the click to the clipboard.
    *
    * The write is the last statement of the handler, and nothing is awaited between it and the
@@ -130,34 +234,40 @@ export default function App() {
    * outcome is rendered instead of assumed (`export/clipboard.ts:10`).
    */
   async function exportReport(depthMinutes: ExportDepthMinutes): Promise<void> {
-    setExportStatus(`Exporting the last ${depthMinutes} min…`);
-
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id === undefined) {
-      setExportStatus('No active tab to report on.');
+    const subject = facts?.subject;
+    if (!subject) {
+      setFeedback('No web page in this window to report on.');
       return;
     }
 
+    setBusy(true);
+    setRetryDepth(null);
+    setFeedback(`Cutting the last ${depthMinutes} min…`);
+
     const answer: unknown = await browser.runtime
-      .sendMessage(exportRequest(tab.id, depthMinutes))
+      .sendMessage(exportRequest(subject.tabId, depthMinutes))
       .catch((error: unknown) => ({ error: String(error) }));
 
     if (isExportFailure(answer)) {
-      setExportStatus(`Export failed: ${answer.error}`);
+      setFeedback(`Export failed: ${answer.error}`);
+      setBusy(false);
       return;
     }
 
     const { bundle, markdown } = answer as ExportResult;
     const outcome = await copyToClipboard(markdown);
-    setExportStatus(
-      outcome.ok
-        ? `Copied ${bundle.entries.length} entries, ${minutes(bundle.window.coveredDepthMinutes * MS_PER_MINUTE)} covered.`
-        : `Report ready but not copied: ${outcome.reason}`,
-    );
+    setFeedback(copyAcknowledgement(bundle, outcome));
+    setRetryDepth(outcome.ok ? null : depthMinutes);
+    setBusy(false);
   }
 
   const lastChange = state.permissionChanges.at(-1);
   const covered = metrics?.coveredMs ?? 0;
+  const status = facts ? scopeStatus(facts) : null;
+  const availability = depthAvailability(facts?.coveredMinutes ?? 0);
+  // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
+  // button there would export a window that was never captured (`phase-8.md:112`).
+  const exportable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
 
   return (
     <main
@@ -166,61 +276,80 @@ export default function App() {
     >
       <h1 className="text-sm font-semibold">Vigie</h1>
 
-      <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs">
-        <dt className="text-muted-foreground">Watched events</dt>
-        <dd data-testid="measure-watched-events" className="text-right font-mono tabular-nums">
-          {state.watchedEvents}
-        </dd>
-
-        <dt className="text-muted-foreground">Network events</dt>
-        <dd data-testid="measure-network-events" className="text-right font-mono tabular-nums">
-          {state.networkEvents}
-        </dd>
-
-        <dt className="text-muted-foreground">Worker starts</dt>
-        <dd data-testid="measure-worker-starts" className="text-right font-mono tabular-nums">
-          {state.workerStarts}
-        </dd>
-
-        <dt className="text-muted-foreground">Permission changes</dt>
-        <dd data-testid="measure-permission-changes" className="text-right font-mono tabular-nums">
-          {state.permissionChanges.length}
-        </dd>
-      </dl>
-
-      <p data-testid="measure-last-permission" className="truncate text-xs text-muted-foreground">
-        {lastChange
-          ? `${lastChange.change}: ${lastChange.origins.join(', ') || '(none)'}`
-          : 'No host permission granted yet.'}
-      </p>
-
-      <section className="flex flex-col gap-2 border-t pt-2">
-        <h2 className="text-xs font-semibold">Export the active tab</h2>
-
-        <div className="flex gap-2">
-          {EXPORT_DEPTHS_MINUTES.map((depth) => (
-            <Button
-              key={depth}
-              data-testid={`export-${depth}`}
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={() => void exportReport(depth)}
-            >
-              {`${depth} min`}
-            </Button>
-          ))}
-        </div>
-
-        <p data-testid="export-status" className="text-xs text-muted-foreground">
-          {exportStatus || 'Pick a depth. The report goes to the clipboard.'}
+      {status ? (
+        <ScopeStatus status={status} onWatch={watchDomainFromPopup} />
+      ) : (
+        <p data-testid="scope-loading" className="text-xs text-muted-foreground">
+          Reading the scope of this tab…
         </p>
-      </section>
+      )}
 
-      <section className="flex flex-col gap-2 border-t pt-2">
-        <h2 className="text-xs font-semibold">Capture store</h2>
+      {exportable && facts ? (
+        <>
+          <DepthButtons
+            availability={availability}
+            busy={busy}
+            onPick={(depth) => void exportReport(depth)}
+          />
+          <TabContextLine text={tabContextLine(facts)} />
+          <CopyFeedback
+            text={feedback}
+            retryDepth={retryDepth}
+            onRetry={(depth) => void exportReport(depth)}
+          />
+        </>
+      ) : null}
+
+      {/*
+        Only one exit is wired. The side panel of phase 10 is not delivered, and a button leading
+        to a surface that does not exist is worse than no button at all (`phase-8.md:139`).
+      */}
+      <Button
+        data-testid="open-options"
+        variant="outline"
+        size="sm"
+        onClick={() => void browser.runtime.openOptionsPage()}
+      >
+        Settings
+      </Button>
+
+      <section className="flex flex-col gap-2 border-t pt-3">
+        <h2 className="text-xs font-semibold text-muted-foreground">
+          Instrumentation — temporary, retired in phase 11
+        </h2>
 
         <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs">
+          <dt className="text-muted-foreground">Watched events</dt>
+          <dd data-testid="measure-watched-events" className="text-right font-mono tabular-nums">
+            {state.watchedEvents}
+          </dd>
+
+          <dt className="text-muted-foreground">Network events</dt>
+          <dd data-testid="measure-network-events" className="text-right font-mono tabular-nums">
+            {state.networkEvents}
+          </dd>
+
+          <dt className="text-muted-foreground">Worker starts</dt>
+          <dd data-testid="measure-worker-starts" className="text-right font-mono tabular-nums">
+            {state.workerStarts}
+          </dd>
+
+          <dt className="text-muted-foreground">Permission changes</dt>
+          <dd
+            data-testid="measure-permission-changes"
+            className="text-right font-mono tabular-nums"
+          >
+            {state.permissionChanges.length}
+          </dd>
+        </dl>
+
+        <p data-testid="measure-last-permission" className="truncate text-xs text-muted-foreground">
+          {lastChange
+            ? `${lastChange.change}: ${lastChange.origins.join(', ') || '(none)'}`
+            : 'No host permission granted yet.'}
+        </p>
+
+        <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-t pt-2 text-xs">
           <dt className="text-muted-foreground">Entries</dt>
           <dd data-testid="storage-entries" className="text-right font-mono tabular-nums">
             {metrics?.entryCount ?? 0}
@@ -235,7 +364,7 @@ export default function App() {
 
           <dt className="text-muted-foreground">Window covered</dt>
           <dd data-testid="storage-covered" className="text-right font-mono tabular-nums">
-            {`${minutes(covered)} / ${minutes(RETENTION_MS)}`}
+            {`${span(covered)} / ${span(RETENTION_MS)}`}
           </dd>
 
           <dt className="text-muted-foreground">Entries per minute</dt>
@@ -292,15 +421,6 @@ export default function App() {
           </Button>
         </div>
       </section>
-
-      <Button
-        data-testid="open-options"
-        variant="outline"
-        size="sm"
-        onClick={() => void browser.runtime.openOptionsPage()}
-      >
-        Watched domains
-      </Button>
     </main>
   );
 }

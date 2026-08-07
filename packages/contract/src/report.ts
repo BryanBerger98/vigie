@@ -53,6 +53,21 @@ export const GAP_STATEMENTS: Record<GapKind, string> = {
     'The window covered is shorter than the one requested: storage pressure forced the oldest entries out before the hour was up.',
 };
 
+/**
+ * The same four gaps, in the few words a control surface has room for.
+ *
+ * A popup is a few hundred pixels wide and cannot render `GAP_STATEMENTS` without burying the
+ * button underneath them, but a user who copies a report has to leave knowing what it does not
+ * hold. These are that summary, and they live beside the full sentences for the same reason those
+ * do: two surfaces naming the same gap differently would read as two different gaps.
+ */
+export const GAP_SUMMARIES: Record<GapKind, string> = {
+  'response-bodies-unavailable': 'no response bodies',
+  'browser-messages-out-of-reach': 'no browser-generated messages',
+  'capture-started-after-page-load': 'nothing before the page had loaded',
+  'window-shrunk-by-quota': 'window shortened by storage pressure',
+};
+
 /** A gap with its canonical wording. The only way a report should ever build one. */
 export function reportGap(kind: GapKind): ReportGap {
   return { kind, statement: GAP_STATEMENTS[kind] };
