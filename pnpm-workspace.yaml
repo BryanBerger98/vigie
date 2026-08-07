@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - packages/*
+  - e2e
+
+# WXT and Playwright ship postinstall steps that pnpm 10 blocks until approved.
+onlyBuiltDependencies:
+  - esbuild
+  - '@playwright/test'

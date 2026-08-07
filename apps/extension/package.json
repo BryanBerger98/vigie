@@ -1,0 +1,32 @@
+{
+  "name": "@vigie/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vigie browser extension (Manifest V3)",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "postinstall": "wxt prepare",
+    "test": "vitest run --passWithNoTests",
+    "lint": "oxlint src && node ./scripts/assert-pinned-build-layer.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vigie/contract": "workspace:*",
+    "clsx": "2.1.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwind-merge": "3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@wxt-dev/module-react": "1.2.2",
+    "tailwindcss": "4.3.3",
+    "vite": "8.2.1",
+    "wxt": "0.21.3"
+  }
+}

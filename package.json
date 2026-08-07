@@ -1,0 +1,25 @@
+{
+  "name": "vigie",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser context capture for bug reports that were never reproduced",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "e2e": "turbo e2e"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "oxlint": "1.77.0",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

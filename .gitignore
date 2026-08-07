@@ -1,0 +1,26 @@
+node_modules/
+.pnpm-store/
+
+# Build output
+.output/
+.wxt/
+dist/
+*.tsbuildinfo
+
+# Task runner cache
+.turbo/
+
+# Playwright
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# OS and editors
+.DS_Store
+*.log
