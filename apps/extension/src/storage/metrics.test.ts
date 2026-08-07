@@ -135,6 +135,61 @@ describe('counting', () => {
   });
 });
 
+describe('the domain split', () => {
+  /** The same entry, stamped with another watched domain. */
+  const on = (domain: string, entry: CaptureEntry): CaptureEntry =>
+    ({ ...entry, domain }) as CaptureEntry;
+
+  it('has no row at all on an empty store', async () => {
+    expect((await captureMetrics(NOW)).byDomain).toEqual([]);
+  });
+
+  it('counts every kind under the domain that admitted it', async () => {
+    await fill(
+      network(1),
+      log(2),
+      on('other.test', failure(3)),
+      on('other.test', network(4, 'r-other')),
+      on('other.test', log(5)),
+    );
+
+    expect((await captureMetrics(NOW)).byDomain).toEqual([
+      { domain: 'other.test', count: 3, bytes: null },
+      { domain: 'example.com', count: 2, bytes: null },
+    ]);
+  });
+
+  // The readout is what makes the scope promise checkable rather than believed: a domain nobody
+  // designated has no row, so a user can read the split against their own list.
+  it('names only the domains that were actually captured', async () => {
+    await fill(network(1), network(2, 'r-second'));
+
+    expect((await captureMetrics(NOW)).byDomain.map((row) => row.domain)).toEqual(['example.com']);
+  });
+
+  it('breaks a tie alphabetically, so two readings of one store agree', async () => {
+    await fill(on('zeta.test', network(1)), on('alpha.test', network(2, 'r-alpha')));
+
+    expect((await captureMetrics(NOW)).byDomain.map((row) => row.domain)).toEqual([
+      'alpha.test',
+      'zeta.test',
+    ]);
+  });
+
+  it('attributes bytes at the store mean, like the kind split does', async () => {
+    quotaSays(0, 100_000);
+    await captureMetrics(NOW);
+
+    quotaSays(4_000, 100_000);
+    await fill(network(1), network(2, 'r2'), on('other.test', log(3)), on('other.test', log(4)));
+
+    expect((await captureMetrics(NOW)).byDomain).toEqual([
+      { domain: 'example.com', count: 2, bytes: 2_000 },
+      { domain: 'other.test', count: 2, bytes: 2_000 },
+    ]);
+  });
+});
+
 describe('the rate', () => {
   it('is entries over the window actually covered, not over the promised hour', async () => {
     await fill(network(1), network(2), network(3), network(4), log(10));

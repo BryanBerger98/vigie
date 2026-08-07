@@ -7,11 +7,13 @@ import { CaptureDatabase, setDatabase } from './db';
 import {
   BATCH_DELAY_MS,
   BATCH_SIZE,
+  captureConsent,
   captureEntry,
   captureScope,
   discardPendingWrites,
   flush,
   pendingWrites,
+  setCaptureConsent,
   setCaptureScope,
   type EntryDraft,
 } from './write';
@@ -19,8 +21,12 @@ import {
 /**
  * The single door into the store, asserted against a real IndexedDB.
  *
- * Two rules carry the whole product here and are tested as such: nothing unwatched is ever written
- * to disk, and every flush prunes. The rest — batching, chaining — is what keeps that affordable.
+ * Three rules carry the whole product here and are tested as such: nothing is written before the
+ * user agreed to the disclosure, nothing unwatched is ever written to disk, and every flush prunes.
+ * The rest — batching, chaining — is what keeps that affordable.
+ *
+ * The setup grants consent, because every test but the consent ones is about what happens *after*
+ * it. The lock defaults to refused and its own block is what asserts that.
  */
 
 const NOW = 1_800_000_000_000;
@@ -53,6 +59,7 @@ function stored() {
 beforeEach(() => {
   fakeBrowser.reset();
   discardPendingWrites();
+  setCaptureConsent(true);
   setCaptureScope([]);
   databases += 1;
   database = new CaptureDatabase(`vigie-write-${databases}`);
@@ -63,6 +70,56 @@ afterEach(async () => {
   discardPendingWrites();
   await database.delete();
   setDatabase(null);
+});
+
+describe('the consent lock', () => {
+  it('is closed until an agreement is pushed to it', () => {
+    setCaptureConsent(false);
+
+    expect(captureConsent()).toBe(false);
+  });
+
+  it('refuses a watched entry while no agreement has been given', async () => {
+    setCaptureConsent(false);
+    setCaptureScope(['example.com']);
+
+    expect(captureEntry(draft(), 'https://example.com/api')).toBe('no-consent');
+    expect(pendingWrites()).toBe(0);
+
+    await flush(NOW);
+    expect(await database.entries.count()).toBe(0);
+  });
+
+  // Consent is checked before the scope: a refusal has nothing to do with which domain it was on,
+  // and answering `out-of-scope` there would attribute the refusal to the wrong rule.
+  it('refuses before looking at the scope at all', () => {
+    setCaptureConsent(false);
+    setCaptureScope([]);
+
+    expect(captureEntry(draft(), 'https://example.com/api')).toBe('no-consent');
+  });
+
+  it('drops what is already queued when the agreement is withdrawn', async () => {
+    setCaptureScope(['example.com']);
+    captureEntry(draft(), 'https://example.com/api');
+
+    setCaptureConsent(false);
+
+    expect(pendingWrites()).toBe(0);
+    await flush(NOW);
+    expect(await database.entries.count()).toBe(0);
+  });
+
+  it('lets the capture through once the agreement is pushed', async () => {
+    setCaptureConsent(false);
+    setCaptureScope(['example.com']);
+    setCaptureConsent(true);
+
+    expect(captureEntry(draft(), 'https://example.com/api')).toBe('queued');
+
+    await flush(NOW);
+    expect(await database.entries.count()).toBe(1);
+  });
 });
 
 describe('the scope filter', () => {

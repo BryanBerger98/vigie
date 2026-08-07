@@ -14,11 +14,19 @@ import { applyConsoleCaptureScope } from '@/capture/console/registration';
 import { storeRelayedCapture } from '@/capture/console/store';
 import { eraseCapturedDataFor } from '@/capture/erase-domain-data';
 import { flushNetworkCapture, networkCapture } from '@/capture/network/listeners';
+import {
+  isCapturePermitted,
+  onConsentChanged,
+  openConsentScreen,
+  readConsent,
+  type ConsentState,
+} from '@/consent/state';
 import { assembleBundle } from '@/export/bundle';
 import { renderReport } from '@/export/markdown';
+import { PURGE_MESSAGE, purgeCapturedData } from '@/storage/purge';
 import { isWatchedUrl, watchedDomainFor } from '@/storage/scope';
 import { onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
-import { FLUSH_MESSAGE, setCaptureScope } from '@/storage/write';
+import { FLUSH_MESSAGE, setCaptureConsent, setCaptureScope } from '@/storage/write';
 
 /**
  * Service worker. Orchestration only: it owns the scope and hands every capture layer its turn.
@@ -30,7 +38,12 @@ import { FLUSH_MESSAGE, setCaptureScope } from '@/storage/write';
  * Two things run side by side here. The capture — `webRequest` into the store, and the page
  * events the content script relays — and the phase 2 measurement probe, which counts events and
  * permission changes into `storage.session`. The probe is not capture; it is what the popup reads
- * today and what the end-to-end suite asserts on, and phase 8 retires it with the popup.
+ * today and what the end-to-end suite asserts on, and phase 11 retires it with the popup.
+ *
+ * The worker also owns the two locks the capture hangs on, and for the same reason in both cases:
+ * the write path reads them synchronously and cannot await storage. The watched domains are one,
+ * the user's agreement to the disclosure is the other. Both start closed at every worker start and
+ * are pushed in as soon as they have been read.
  *
  * The phase 6 storage figures are not a third counter: they are read straight off the store by
  * whoever asks (`storage/metrics.ts`). The worker's only part in them is `FLUSH_MESSAGE`, which
@@ -148,6 +161,28 @@ export default defineBackground(() => {
   networkProbe.apply();
   networkCapture.apply();
 
+  // The consent lock. It is pushed to the write path rather than consulted there, because
+  // `webRequest.onCompleted` is synchronous and a storage read is not (`storage/write.ts:80`).
+  // Every worker start reopens the question: the lock defaults to refused and only a read that
+  // came back with an agreement in force reopens it.
+  const applyConsent = (state: ConsentState) => {
+    const permitted = isCapturePermitted(state);
+    setCaptureConsent(permitted);
+    console.info('[vigie] capture %s (consent %s)', permitted ? 'allowed' : 'blocked', state.status);
+  };
+
+  void readConsent().then(applyConsent);
+  onConsentChanged(applyConsent);
+
+  // A first launch, or an update that ships a wording the stored agreement no longer covers. The
+  // screen is raised rather than waited for: a user who never opens the popup would otherwise run
+  // an extension that captures nothing and never says why (`design.md:23`).
+  browser.runtime.onInstalled.addListener(() => {
+    void readConsent().then((state) => {
+      if (!isCapturePermitted(state)) void openConsentScreen();
+    });
+  });
+
   // Both halves of the scope, followed independently. The list decides what the extension writes
   // down; the permission decides what the browser hands it in the first place. A domain added
   // has to start capturing without a restart, so neither may be read once and cached for good.
@@ -193,6 +228,20 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message === FLUSH_MESSAGE) {
       void flushNetworkCapture().then(() => sendResponse(true));
+      return true;
+    }
+
+    // The purge runs here and nowhere else: the batch queue is module state of this worker, and a
+    // settings page clearing its own would leave the real one to land behind the erasure
+    // (`storage/purge.ts:13`).
+    if (message === PURGE_MESSAGE) {
+      purgeCapturedData().then(
+        (deleted) => sendResponse({ deleted }),
+        (error: unknown) => {
+          console.error('[vigie] could not purge the capture store', error);
+          sendResponse({ error: error instanceof Error ? error.message : String(error) });
+        },
+      );
       return true;
     }
 

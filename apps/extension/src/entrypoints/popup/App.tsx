@@ -10,6 +10,13 @@ import {
   MEASUREMENT_STATE_KEY,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { ConsentRequired } from '@/consent/ConsentRequired';
+import {
+  isCapturePermitted,
+  onConsentChanged,
+  readConsent,
+  type ConsentState,
+} from '@/consent/state';
 import { copyToClipboard } from '@/export/clipboard';
 import { countForTab, oldestCaptureAt } from '@/export/slice';
 import {
@@ -48,6 +55,10 @@ import {
  * what only a surface can do: read the browser, keep the clipboard write inside the click, and
  * re-read when something behind the popup's back moves the scope.
  *
+ * Before any of that, the disclosure. While the agreement is missing or outdated the popup shows
+ * the gate and nothing else: every control below it acts on a store the write path is refusing to
+ * fill, and a depth button there would export a window that was never captured.
+ *
  * ## The instrumentation below the fold
  *
  * Two provisional readouts still share this surface: the phase 2 probe, and the phase 6 storage
@@ -81,6 +92,7 @@ function percent(ratio: number | null): string {
 const IDLE_FEEDBACK = 'Pick a depth. The report goes straight to the clipboard.';
 
 export default function App() {
+  const [consent, setConsent] = useState<ConsentState | null>(null);
   const [facts, setFacts] = useState<PopupFacts | null>(null);
   const [feedback, setFeedback] = useState<string>(IDLE_FEEDBACK);
   const [retryDepth, setRetryDepth] = useState<ExportDepthMinutes | null>(null);
@@ -131,6 +143,13 @@ export default function App() {
   const refresh = useCallback(async () => {
     setFacts(await readFacts());
   }, [readFacts]);
+
+  // The agreement is read on its own and followed: it is answered in another tab, and the popup
+  // has to open up the moment it lands rather than the next time it is reopened.
+  useEffect(() => {
+    void readConsent().then(setConsent);
+    return onConsentChanged(setConsent);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -268,6 +287,21 @@ export default function App() {
   // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
   // button there would export a window that was never captured (`phase-8.md:112`).
   const exportable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
+
+  // The gate, and nothing under it. Every control below acts on a store the write path is refusing
+  // to fill, so a scope line here would announce a capture that is not happening and a depth button
+  // would export a window that was never recorded. `popup-root` stays: the popup did mount.
+  if (consent !== null && !isCapturePermitted(consent)) {
+    return (
+      <main
+        data-testid="popup-root"
+        className="flex w-80 flex-col gap-3 bg-background p-4 text-foreground"
+      >
+        <h1 className="text-sm font-semibold">Vigie</h1>
+        <ConsentRequired state={consent} />
+      </main>
+    );
+  }
 
   return (
     <main

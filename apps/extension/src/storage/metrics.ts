@@ -36,6 +36,14 @@ export interface KindVolume {
   bytes: number | null;
 }
 
+export interface DomainVolume {
+  /** The watched domain the entries were stamped with, never the host they came from. */
+  domain: string;
+  count: number;
+  /** Bytes attributable to this domain, at the store's mean cost per entry. `null` without a quota. */
+  bytes: number | null;
+}
+
 export interface CaptureMetrics {
   /** When the reading was taken. A relevé is worthless without its timestamp. */
   takenAt: number;
@@ -45,6 +53,12 @@ export interface CaptureMetrics {
    * console entry loses its text, and the two decisions have nothing to do with each other.
    */
   byKind: Record<EntryKind, KindVolume>;
+  /**
+   * Split by watched domain, heaviest first. This is the readout that makes the scope promise
+   * auditable rather than believed: a domain nobody designated has no row here, and the settings
+   * screen shows the list as it stands (`phase-9.md` task 3).
+   */
+  byDomain: DomainVolume[];
   /** Epoch ms of the oldest entry held, `null` when the store is empty. */
   oldestEntryAt: number | null;
   /** How much time the store covers. Under an hour it is the whole capture; at an hour, the cap. */
@@ -73,6 +87,7 @@ export const EMPTY_CAPTURE_METRICS: CaptureMetrics = {
   takenAt: 0,
   entryCount: 0,
   byKind: { network: EMPTY_VOLUME, console: EMPTY_VOLUME, error: EMPTY_VOLUME },
+  byDomain: [],
   oldestEntryAt: null,
   coveredMs: 0,
   entriesPerMinute: 0,
@@ -129,21 +144,31 @@ async function baseline(entryCount: number, usage: number | null): Promise<numbe
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** Counts the table by kind in one pass. There is no `kind` index, and deliberately so — see below. */
-async function countByKind(): Promise<{ counts: Record<EntryKind, number>; total: number }> {
+interface EntryTally {
+  counts: Record<EntryKind, number>;
+  domains: Map<string, number>;
+  total: number;
+}
+
+/** Counts the table by kind and by domain in one pass. Both splits ride the same walk. */
+async function countEntries(): Promise<EntryTally> {
   const counts: Record<EntryKind, number> = { network: 0, console: 0, error: 0 };
+  const domains = new Map<string, number>();
   let total = 0;
 
-  // A full walk rather than three indexed counts. An index earns its keep on the read path and
-  // costs on the write path, and the write path is precisely what this phase measures: paying for
-  // the instrument out of the thing under test would bias the result it produces (`db.ts:26`).
+  // A full walk rather than indexed counts. An index earns its keep on the read path and costs on
+  // the write path, and the write path is what has to stay cheap: paying for the instrument out of
+  // the thing under test would bias the result it produces (`db.ts:26`). The domain split is the
+  // same argument twice over — `[domain+timestamp]` exists for the erase path and counting through
+  // it once per domain would be several cursors where this is one.
   await db().entries.each((entry) => {
     total += 1;
     const kind = entry.kind as EntryKind;
     if (kind in counts) counts[kind] += 1;
+    domains.set(entry.domain, (domains.get(entry.domain) ?? 0) + 1);
   });
 
-  return { counts, total };
+  return { counts, domains, total };
 }
 
 /**
@@ -152,8 +177,8 @@ async function countByKind(): Promise<{ counts: Record<EntryKind, number>; total
  * `now` is injected so a test can state a window rather than wait for one.
  */
 export async function captureMetrics(now = Date.now()): Promise<CaptureMetrics> {
-  const [{ counts, total }, oldest, estimate] = await Promise.all([
-    countByKind(),
+  const [{ counts, domains, total }, oldest, estimate] = await Promise.all([
+    countEntries(),
     db().entries.orderBy('timestamp').first(),
     estimateQuota(),
   ]);
@@ -187,6 +212,14 @@ export async function captureMetrics(now = Date.now()): Promise<CaptureMetrics> 
       console: volume(counts.console, rate(counts.console), bytesPerEntry),
       error: volume(counts.error, rate(counts.error), bytesPerEntry),
     },
+    byDomain: [...domains]
+      .map(([domain, count]) => ({
+        domain,
+        count,
+        bytes: bytesPerEntry === null ? null : bytesPerEntry * count,
+      }))
+      // Heaviest first, ties broken alphabetically so two readings of the same store agree.
+      .sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain)),
     oldestEntryAt,
     coveredMs,
     entriesPerMinute,

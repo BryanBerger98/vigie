@@ -8,9 +8,12 @@ import { watchedDomainFor } from './scope';
  * The only door into the capture store.
  *
  * Every layer — network here, console and errors in phase 5 — hands its entries to this module
- * and to nothing else. Two rules live on this path and nowhere downstream (`database.md:38-39`):
+ * and to nothing else. Three rules live on this path and nowhere downstream (`database.md:38-39`):
  *
- * - **Scope first.** Filtering at export time would mean unwatched traffic reaching the disk,
+ * - **Consent first.** Nothing is written before the user has agreed to the disclosure. The lock
+ *   is here rather than on each capture layer for the same reason the scope filter is: this is the
+ *   one place that cannot be bypassed by adding a fourth layer later.
+ * - **Scope second.** Filtering at export time would mean unwatched traffic reaching the disk,
  *   which contradicts the one promise the product makes. Nothing unwatched is ever written.
  * - **Prune on write.** The rolling hour is enforced at each flush, because an MV3 timer does not
  *   survive the worker being terminated.
@@ -32,7 +35,7 @@ export type EntryDraft = CaptureEntry extends infer T
   : never;
 
 /** Why an entry was or was not queued. Returned rather than thrown: rejection is the normal case. */
-export type WriteOutcome = 'queued' | 'out-of-scope' | 'no-tab';
+export type WriteOutcome = 'queued' | 'no-consent' | 'out-of-scope' | 'no-tab';
 
 /**
  * Entries buffered per flush. A busy page produces hundreds of `webRequest` events a minute and
@@ -63,10 +66,32 @@ export const BATCH_DELAY_MS = 250;
  */
 export const FLUSH_MESSAGE = 'vigie:flush';
 
+let consented = false;
 let scope: readonly string[] = [];
 let queue: NewEntry[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> = Promise.resolve();
+
+/**
+ * Whether the user has agreed to the disclosure of what gets captured.
+ *
+ * Held here for the same reason the scope is: the `webRequest` listeners are synchronous and
+ * cannot await a storage read, and this is the one place the answer has to be right. It starts
+ * refused and stays refused until the worker pushes an agreement it has read
+ * (`entrypoints/background.ts`) — a lock that defaulted to open would capture during every window
+ * a cold start opens, which is precisely the window a first launch is made of.
+ *
+ * Withdrawing it also drops whatever the queue still holds. The user was told nothing more would
+ * be written; a batch landing behind that would make the statement false.
+ */
+export function setCaptureConsent(granted: boolean): void {
+  consented = granted;
+  if (!granted) discardPendingWrites();
+}
+
+export function captureConsent(): boolean {
+  return consented;
+}
 
 /**
  * The watched domains the write path filters on. Held here rather than passed at every call: the
@@ -94,6 +119,8 @@ export function captureScope(): readonly string[] {
  * so they are dead data and are refused rather than stored (`prd.md` scopes an export to a tab).
  */
 export function captureEntry(draft: EntryDraft, url: string): WriteOutcome {
+  if (!consented) return 'no-consent';
+
   const domain = watchedDomainFor(url, scope);
   if (domain === null) return 'out-of-scope';
   if (draft.tabId < 0) return 'no-tab';
