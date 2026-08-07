@@ -24,9 +24,10 @@ changerait ce comportement.
 
 | Élément | Valeur |
 | --- | --- |
-| Navigateur | Google Chrome for Testing **151.0.7922.34** (arm64, build Playwright `chromium-1234`) |
+| Mesure automatisée | Google Chrome for Testing **151.0.7922.34** (arm64, build Playwright `chromium-1234`) |
+| Observation manuelle | **Brave Browser 151.1.93.129** — même socle Chromium 151, navigateur de travail du projet |
 | Plateforme | macOS 25.6.0, Apple Silicon |
-| Extension | build WXT `chrome-mv3`, manifeste V3, profil neuf à chaque lancement |
+| Extension | build WXT `chrome-mv3`, manifeste V3, profil neuf à chaque lancement automatisé |
 | Harnais | Playwright, contexte persistant, `--load-extension` |
 | Date | 7 août 2026 |
 
@@ -61,11 +62,41 @@ visite 2                          : N événements   (et non 2N)
 `registerOnce` retire avant d'ajouter ; l'empilement de listeners ne se produit pas. Mesuré deux
 fois : en unitaire sur un événement factice, et ici dans le navigateur réel.
 
-### `3)` Après terminaison — **non observable** (voir G2)
+### `3)` Après terminaison — **capte**, observé à la main
 
-Le scénario n'a pas de résultat observé. Chrome maintient un service worker d'extension en vie tant
-qu'un débogueur y est attaché, et Playwright s'attache à toutes les cibles worker. Trois façons de
-forcer l'arrêt ont été mesurées, aucune n'a fonctionné.
+Non automatisable (voir G2), donc exécuté manuellement sur Brave 151.1.93.129 :
+
+1. Permission accordée sur **un seul domaine**, pas sur toutes les URL — ce point n'est pas un
+   détail, voir la section suivante.
+2. Service worker arrêté explicitement depuis `brave://serviceworker-internals`, sur la
+   registration dont le scope est celui de l'extension.
+3. Navigation sur le domaine autorisé, **sans ouvrir la popup** — pour que le réveil vienne de
+   l'événement réseau et de rien d'autre.
+4. Popup ouverte ensuite : le worker a bien redémarré et le compteur d'événements a progressé.
+
+Le réveil par événement réseau restaure la capture. L'enregistrement au niveau supérieur de
+`background.ts` est bien la condition de réveil, comme le contrat MV3 l'annonce.
+
+## L'étendue de la permission décide de la durée de vie du worker
+
+C'est l'enseignement inattendu de la mesure, et il ne concerne pas que cette phase.
+
+Avec une permission sur **toutes les URL**, le service worker ne s'endort **jamais**. Le trafic de
+fond d'un navigateur au repos — listes de filtres, télémétrie, onglets qui interrogent en boucle —
+suffit à produire un `onCompleted` avant l'expiration du minuteur de 30 secondes, qui se réarme à
+chaque événement. Première tentative d'observation : compteur à 268 événements, `Worker starts`
+figé à 1, worker toujours listé comme actif après une minute d'attente.
+
+Avec une permission **scopée à un domaine**, le worker s'endort normalement et se réveille sur la
+première requête de ce domaine.
+
+| Étendue accordée | Durée de vie du worker | Conséquence |
+| --- | --- | --- |
+| Toutes les URL | Quasi permanent | Le tampon de capture vit longtemps en mémoire — dimensionnement à traiter en phase 4 |
+| Un domaine | Cycles arrêt/réveil normaux | Le chemin de réveil est réellement emprunté, donc réellement exposé aux régressions |
+
+La phase 3 demande des permissions par domaine ; cette mesure confirme que c'est aussi le bon choix
+du point de vue du cycle de vie, pas seulement de la vie privée.
 
 ## Ce qui a aussi été mesuré
 
@@ -75,6 +106,8 @@ forcer l'arrêt ont été mesurées, aucune n'a fonctionné.
 | Domaine jamais autorisé | Aucun événement — le compteur reste à zéro |
 | Lecture sans DevTools | La popup expose le compteur, il progresse pendant la navigation |
 | Requêtes propres à l'extension | Visibles **sans** accès à l'hôte — voir la déviation ci-dessous |
+| `permissions.onAdded` sur le chemin **optionnel** | Se déclenche, confirmé à la main : le compteur de changements bouge après un octroi et après une révocation depuis la popup |
+| Permission optionnelle une fois accordée | Apparaît dans « Accès aux sites » de la page extensions, avec son menu de révocation |
 
 ## Lacunes de mesure
 
@@ -120,10 +153,13 @@ La première tentative avait d'abord été faussée par la boucle d'attente elle
 le worker toutes les 10 secondes — cette activité réarme le minuteur d'inactivité. Reprise avec des
 vérifications purement locales, le résultat est le même.
 
-**Ce qui limite le risque** : l'enregistrement du listener est au niveau supérieur de
-`background.ts`, ce qui est la condition de réveil du worker en MV3, et l'état de mesure vit dans
-`chrome.storage.session`, qui survit à l'arrêt du worker. Ce n'est pas une observation, c'est le
-contrat MV3. Le scénario 3 reste à vérifier à la main, dans un Chrome sans débogueur.
+Chrome maintient un service worker d'extension en vie tant qu'un débogueur y est attaché, et
+Playwright s'attache à toutes les cibles worker qu'il voit. **La lacune porte donc sur
+l'automatisation, pas sur le comportement** : le scénario 3 a été observé à la main et il passe.
+
+Ce que ça coûte : aucune spécification de non-régression ne couvre le cycle arrêt/réveil. Une
+régression sur ce chemin ne se verra qu'en test manuel. À reprendre si un jour Playwright expose
+un moyen d'arrêter un worker d'extension.
 
 ## Déviation assumée par rapport à l'instruction
 
@@ -144,7 +180,9 @@ la mesure, si. Le filtre définitif de la capture est de toute façon décidé e
 | --- | --- |
 | Le manifeste garde `optional_host_permissions`, sans `host_permissions` statiques | Le harnais de test des phases 3 à 11, que G1 laisse ouvert |
 | Un domaine ajouté capture immédiatement, sans redémarrage | Le filtre de capture définitif (phase 4) |
+| Le réveil du worker restaure la capture | Le dimensionnement du tampon quand le worker ne s'endort pas (phase 4) |
 | `registerOnce` sur `onAdded` / `onRemoved` reste, par précaution | L'écran de consentement (phase 9), inchangé par cette mesure |
+| Les permissions se demandent **par domaine**, jamais sur toutes les URL | — |
 
 ## Fichiers
 
