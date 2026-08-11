@@ -110,7 +110,7 @@ construction :
 
 | Question probable | Réponse, et sa preuve |
 | --- | --- |
-| « Où part la donnée ? » | Nulle part. Aucun `fetch` ni `XMLHttpRequest` vers un hôte tiers dans le code de l'extension ; la seule sortie est le presse-papier, à la demande. |
+| « Où part la donnée ? » | Nulle part. Aucun `fetch` ni `XMLHttpRequest` vers un hôte tiers dans le code de l'extension ; la seule sortie est un fichier Markdown écrit dans le dossier de téléchargements, à la demande. |
 | « Le consentement précède-t-il la capture ? » | Oui, verrou sur le chemin d'écriture (`storage/write.ts:121`), pas sur la surface. Un domaine surveillé mais parcouru avant l'accord ne laisse rien (`consent-flow.spec.ts:121`). |
 | « L'utilisateur peut-il tout effacer ? » | Oui, depuis les réglages, et le retrait d'un domaine efface ce qui le concernait (`watched-domains.ts:116`). |
 | « Pourquoi `*://*/*` ? » | Déclaration optionnelle seulement ; rien n'est accordé à l'installation. |

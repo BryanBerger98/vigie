@@ -27,7 +27,7 @@ The terms a contributor must know to read the code.
 | export window | How far back a single export reaches — 5, 15, 30, or 60 minutes. One hour is a hard ceiling. |
 | recording | A screen recording bounded by the user: start, stop, download. Not a buffer, and not attached to the export. |
 | capture layer | One of the three observation sources: SDK, `chrome.webRequest`, `chrome.debugger`. Each has blind spots the others cover. |
-| bundle | The assembled report — context, network log, console log — rendered as Markdown and copied to the clipboard. |
+| bundle | The assembled report — context, network log, console log — rendered as Markdown and downloaded as a file. |
 | schema version | The version of the event contract shared between SDK and extension. An SDK newer or older than the extension is detected through it. |
 
 ## Key features

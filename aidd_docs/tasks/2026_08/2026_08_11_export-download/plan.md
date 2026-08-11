@@ -115,6 +115,9 @@ S'y ajoute une assertion neuve : le contenu du fichier téléchargé est lu et c
 `cws-submission.md:113` affirme que « la seule sortie est le presse-papier ».
 La phrase devient fausse, et c'est une déclaration faite au Chrome Web Store.
 
+S'y ajoute `docs/privacy-policy.md:40` et `:68`, absent de la liste ci-dessus : la politique de confidentialité publiée sur GitHub Pages annonce elle aussi le presse-papier comme seule sortie.
+C'est le document que l'examinateur du Chrome Web Store lit en premier.
+
 Les documents de phase déjà exécutés (`phase-7.md`, `phase-8.md`, `phase-11.md`) ne sont pas réécrits : ce sont des archives de ce qui a été fait.
 L'amendement est consigné ici.
 

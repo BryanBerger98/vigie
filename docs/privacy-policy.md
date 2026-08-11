@@ -5,7 +5,7 @@ description: What the Vigie browser extension records, where it stays, and how l
 
 # Vigie — Privacy policy
 
-**Last updated: 2026-08-07 · Applies to the disclosure wording shipped as version 1.**
+**Last updated: 2026-08-11 · Applies to the disclosure wording shipped as version 1.**
 
 Vigie keeps the last hour of what your browser does on the domains you designate, so you can hand
 over the context of a bug that already happened instead of trying to reproduce it.
@@ -37,7 +37,7 @@ Uncaught exceptions and unhandled promise rejections, with their message and the
 ### Nothing leaves this machine
 
 Vigie has no server, no account and no telemetry. What it records stays in this browser profile
-until you copy a report yourself.
+until you export a report yourself.
 
 ### Nothing outside the domains you designate
 
@@ -65,12 +65,13 @@ Two consequences follow, and they are the honest ones:
 ## What leaves, and only when you ask
 
 One thing, one way: the report. Choosing a depth in the popup assembles the matching slice of the
-capture into a Markdown document and puts it on your clipboard. Where it goes next is your doing —
-a ticket, a chat message, a colleague.
+capture into a Markdown document and writes it to your downloads folder, as
+`vigie-<domain>-<date>-<time>.md`. Where it goes next is your doing — a ticket, a chat message, a
+colleague. The file stays on disk until you delete it.
 
 That report carries what the capture carries, request and response headers included. **Authentication
-tokens, session cookies and API keys are therefore in it.** Read a report before pasting it
-somewhere you would not paste a session cookie.
+tokens, session cookies and API keys are therefore in it.** Read a report before sending it
+somewhere you would not send a session cookie.
 
 ## How long it is kept
 

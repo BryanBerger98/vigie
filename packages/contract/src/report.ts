@@ -143,7 +143,7 @@ export interface ExportRequest {
 
 export interface ExportResult {
   bundle: ReportBundle;
-  /** The rendered report — exactly the text that reaches the clipboard, rendered once. */
+  /** The rendered report — exactly the text the downloaded file holds, rendered once. */
   markdown: string;
 }
 
