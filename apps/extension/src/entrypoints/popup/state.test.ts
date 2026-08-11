@@ -6,8 +6,8 @@ import { RETENTION_MS } from '@/storage/prune';
 import {
   DEFAULT_EXPORT_DEPTH_MINUTES,
   IDLE_FEEDBACK,
-  copyAcknowledgement,
   depthAvailability,
+  downloadAcknowledgement,
   exportFailure,
   resolveCurrentDepth,
   scopeStatus,
@@ -182,59 +182,74 @@ function bundle(overrides: Partial<ReportBundle['window']> = {}, entries = 3): R
   };
 }
 
-describe('copyAcknowledgement', () => {
-  it('puts the outcome in the headline, where nothing else competes with it', () => {
-    const view = copyAcknowledgement(bundle(), { ok: true });
+const FILENAME = 'vigie-example.com-2026-02-02-000000.md';
 
-    expect(view.kind).toBe('copied');
-    expect(view.headline).toBe('Copied 3 entries');
+describe('downloadAcknowledgement', () => {
+  it('leads with the filename, the one thing that makes a download list navigable', () => {
+    const view = downloadAcknowledgement(bundle(), FILENAME, { ok: true });
+
+    expect(view.kind).toBe('downloaded');
+    expect(view.headline).toBe(`Saved ${FILENAME}`);
+  });
+
+  it('says how much left in the file, since the name says nothing about it', () => {
+    expect(downloadAcknowledgement(bundle(), FILENAME, { ok: true }).detail).toContain('3 entries.');
   });
 
   it('stays quiet about the depth when it is the one that was asked for', () => {
-    expect(copyAcknowledgement(bundle(), { ok: true }).detail).not.toContain('not the 15 min');
+    expect(downloadAcknowledgement(bundle(), FILENAME, { ok: true }).detail).not.toContain(
+      'not the 15 min',
+    );
   });
 
   it('announces the delivered depth when it is shorter than the one requested', () => {
-    const view = copyAcknowledgement(
+    const view = downloadAcknowledgement(
       bundle({ requestedDepthMinutes: 60, coveredDepthMinutes: 22.36 }),
+      FILENAME,
       { ok: true },
     );
 
     expect(view.detail).toContain('covers 22.4 min, not the 60 min asked');
   });
 
-  it('says the report is empty rather than reporting a successful copy of nothing', () => {
-    const view = copyAcknowledgement(bundle({}, 0), { ok: true });
+  it('says the file is empty rather than letting a name pass for a report', () => {
+    const view = downloadAcknowledgement(bundle({}, 0), FILENAME, { ok: true });
 
-    expect(view.headline).toBe('Copied an empty report');
     expect(view.detail).toContain('last 15 min');
+    expect(view.detail).toContain('the report is empty');
   });
 
   it('summarises the gaps the report declares', () => {
-    expect(copyAcknowledgement(bundle(), { ok: true }).detail).toContain(
+    expect(downloadAcknowledgement(bundle(), FILENAME, { ok: true }).detail).toContain(
       'Declared in the report: no response bodies.',
     );
   });
 
-  it('reports a refused clipboard instead of a copy', () => {
-    const view = copyAcknowledgement(bundle(), { ok: false, reason: 'blocked by policy' });
+  it('reports a refused write instead of a file', () => {
+    const view = downloadAcknowledgement(bundle(), FILENAME, {
+      ok: false,
+      reason: 'blocked by policy',
+    });
 
     expect(view.kind).toBe('failed');
-    expect(view.headline).toBe('Not copied');
+    expect(view.headline).toBe('Not saved');
     expect(view.detail).toContain('blocked by policy');
   });
 
-  it('never says copied on a refusal, whichever line a reader lands on', () => {
-    const view = copyAcknowledgement(bundle(), { ok: false, reason: 'blocked by policy' });
+  it('never names a file on a refusal, whichever line a reader lands on', () => {
+    const view = downloadAcknowledgement(bundle(), FILENAME, {
+      ok: false,
+      reason: 'blocked by policy',
+    });
 
-    expect(`${view.headline} ${view.detail}`).not.toContain('Copied');
+    expect(`${view.headline} ${view.detail}`).not.toContain(FILENAME);
   });
 });
 
 describe('the states that surround an acknowledgement', () => {
-  it('opens on nothing copied, rather than on a line that could be read as a receipt', () => {
+  it('opens on nothing exported, rather than on a line that could be read as a receipt', () => {
     expect(IDLE_FEEDBACK.kind).toBe('idle');
-    expect(IDLE_FEEDBACK.headline).toBe('Nothing copied yet');
+    expect(IDLE_FEEDBACK.headline).toBe('Nothing exported yet');
   });
 
   it('names the depth being cut while the export runs', () => {

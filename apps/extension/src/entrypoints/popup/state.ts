@@ -5,7 +5,7 @@ import {
   type ReportBundle,
 } from '@vigie/contract';
 
-import type { CopyOutcome } from '@/export/clipboard';
+import type { DownloadOutcome } from '@/export/download';
 import { RETENTION_MS } from '@/storage/prune';
 
 /**
@@ -13,7 +13,7 @@ import { RETENTION_MS } from '@/storage/prune';
  *
  * The surface itself is four small components and a click handler; everything that could be wrong
  * is here — which state the tab is in, which depths the store can honour, and what the user is
- * told they just copied. Kept pure so those three answers are asserted without a browser, and so
+ * told they just took away. Kept pure so those three answers are asserted without a browser, and so
  * the components stay renderers rather than places where a rule hides.
  *
  * Every sentence this module returns is user-facing text. It lives beside the rule that produces
@@ -220,71 +220,74 @@ export function tabContextLine(facts: PopupFacts): string {
 }
 
 /**
- * Where the export is, from the point of view of someone who cannot see the clipboard.
+ * Where the export is, from the point of view of someone who has not opened their downloads yet.
  *
- * Four states rather than one sentence that keeps changing. A copy leaves no visible trace anywhere
- * — not on the page, not on the button, not in the clipboard the user cannot open — so the only
- * proof the click worked is this block. It had none of the marks of an event: idle, working,
- * copied and refused all rendered as the same grey line, under a context line rendered the same
- * way again. A reader had to compare wordings to find out whether anything had happened.
+ * Four states rather than one sentence that keeps changing. A download leaves no trace on the
+ * surface that produced it — not on the page, not on the button — so the only proof the click
+ * worked is this block. It had none of the marks of an event: idle, working, done and refused all
+ * rendered as the same grey line, under a context line rendered the same way again. A reader had to
+ * compare wordings to find out whether anything had happened.
  */
-export type CopyFeedbackKind = 'idle' | 'working' | 'copied' | 'failed';
+export type ExportFeedbackKind = 'idle' | 'working' | 'downloaded' | 'failed';
 
-export interface CopyFeedbackView {
-  kind: CopyFeedbackKind;
+export interface ExportFeedbackView {
+  kind: ExportFeedbackKind;
   /** What happened, in the few words that carry the state on their own (`design.md:28`). */
   headline: string;
   /** What the headline has no room for. Empty when there is nothing to add. */
   detail: string;
 }
 
-/** Before any click. Says the gesture exists, and does not pretend anything has been copied. */
-export const IDLE_FEEDBACK: CopyFeedbackView = {
+/** Before any click. Says the gesture exists, and does not pretend anything has been written. */
+export const IDLE_FEEDBACK: ExportFeedbackView = {
   kind: 'idle',
-  headline: 'Nothing copied yet',
-  detail: 'One click, and the report goes straight to the clipboard.',
+  headline: 'Nothing exported yet',
+  detail: 'One click, and the report lands in your downloads as a Markdown file.',
 };
 
 /** Between the click and the answer. The depth is repeated: it is what the wait is for. */
-export function workingFeedback(depthMinutes: ExportDepthMinutes): CopyFeedbackView {
+export function workingFeedback(depthMinutes: ExportDepthMinutes): ExportFeedbackView {
   return { kind: 'working', headline: `Cutting the last ${depthMinutes} min…`, detail: '' };
 }
 
-/** The export never reached the clipboard, and the reason is the browser's own words. */
-export function exportFailure(reason: string): CopyFeedbackView {
+/** The report was never rendered at all, and the reason is the worker's own words. */
+export function exportFailure(reason: string): ExportFeedbackView {
   return { kind: 'failed', headline: 'Export failed', detail: reason };
 }
 
 /**
  * What the user is told they just took away.
  *
- * Three things have to survive the copy, and none of them is visible in the clipboard: how deep
- * the report really goes, whether it holds anything at all, and what it structurally cannot show.
- * The headline holds the first answer a user wants — did it copy, and how much — and the detail
- * holds the qualifications. A depth is only mentioned when it differs from the one asked for:
- * repeating "5 min" after a five-minute click is noise that trains the reader to skip the line
- * where it matters.
+ * The filename leads, because it is the one thing that turns "it worked" into something actionable:
+ * a download list holds everything the browser ever wrote, and a user who does not know what to
+ * look for has been told nothing. It is also what the acknowledgement gained by becoming a file —
+ * a clipboard has no name to give.
+ *
+ * The detail then carries what the file itself cannot say from the outside: how deep the report
+ * really goes, whether it holds anything at all, and what it structurally cannot show. A depth is
+ * only mentioned when it differs from the one asked for — repeating "5 min" after a five-minute
+ * click is noise that trains the reader to skip the line where it matters.
  */
-export function copyAcknowledgement(bundle: ReportBundle, outcome: CopyOutcome): CopyFeedbackView {
+export function downloadAcknowledgement(
+  bundle: ReportBundle,
+  filename: string,
+  outcome: DownloadOutcome,
+): ExportFeedbackView {
   if (!outcome.ok) {
     return {
       kind: 'failed',
-      headline: 'Not copied',
-      detail: `The report is ready, but the clipboard refused it: ${outcome.reason}`,
+      headline: 'Not saved',
+      detail: `The report is ready, but the browser refused to write it: ${outcome.reason}`,
     };
   }
 
   const { requestedDepthMinutes, coveredDepthMinutes } = bundle.window;
   const count = bundle.entries.length;
 
-  const empty = count === 0;
-  const headline = empty
-    ? 'Copied an empty report'
-    : `Copied ${count} ${count === 1 ? 'entry' : 'entries'}`;
-
-  const nothing = empty
-    ? `Nothing was captured on this tab in the last ${minutes(requestedDepthMinutes)} min.`
-    : '';
+  const held =
+    count === 0
+      ? `Nothing was captured on this tab in the last ${minutes(requestedDepthMinutes)} min, so the report is empty.`
+      : `${count} ${count === 1 ? 'entry' : 'entries'}.`;
 
   // A tenth of a minute of slack: the covered depth is a measured duration, and the two are equal
   // in every way a reader cares about long before they are equal as floats.
@@ -299,8 +302,8 @@ export function copyAcknowledgement(bundle: ReportBundle, outcome: CopyOutcome):
       : `Declared in the report: ${bundle.gaps.map((gap) => GAP_SUMMARIES[gap.kind]).join(', ')}.`;
 
   return {
-    kind: 'copied',
-    headline,
-    detail: [nothing, shorter, gaps].filter((part) => part.length > 0).join(' '),
+    kind: 'downloaded',
+    headline: `Saved ${filename}`,
+    detail: [held, shorter, gaps].filter((part) => part.length > 0).join(' '),
   };
 }

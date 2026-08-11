@@ -13,7 +13,8 @@ import {
   readConsent,
   type ConsentState,
 } from '@/consent/state';
-import { copyToClipboard } from '@/export/clipboard';
+import { downloadReport } from '@/export/download';
+import { reportFilename } from '@/export/filename';
 import { countForTab, oldestCaptureAt } from '@/export/slice';
 import { RETENTION_MS, readStorageState } from '@/storage/prune';
 import { watchedDomainFor } from '@/storage/scope';
@@ -21,8 +22,8 @@ import { hasHostAccess, onWatchedDomainsChanged, readWatchedDomains } from '@/st
 import { FLUSH_MESSAGE } from '@/storage/write';
 import { Button } from '@/ui/components/button';
 
-import { CopyFeedback } from './CopyFeedback';
 import { ExportButton } from './ExportButton';
+import { ExportFeedback } from './ExportFeedback';
 import { PopupHeader } from './PopupHeader';
 import { ScopeStatus } from './ScopeStatus';
 import { TabContextLine } from './TabContextLine';
@@ -31,14 +32,14 @@ import { resolveSubjectTab } from './subject-tab';
 import {
   IDLE_FEEDBACK,
   MS_PER_MINUTE,
-  copyAcknowledgement,
   depthAvailability,
+  downloadAcknowledgement,
   exportFailure,
   resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
   workingFeedback,
-  type CopyFeedbackView,
+  type ExportFeedbackView,
   type PopupFacts,
 } from './state';
 
@@ -47,8 +48,8 @@ import {
  * its report. Nothing between the two but one click (`spec.md:13`).
  *
  * What could be wrong lives in `state.ts` and is asserted without a browser. What is left here is
- * what only a surface can do: read the browser, keep the clipboard write inside the click, and
- * re-read when something behind the popup's back moves the scope.
+ * what only a surface can do: read the browser, write the file the click asked for, and re-read
+ * when something behind the popup's back moves the scope.
  *
  * Before any of that, the disclosure. While the agreement is missing or outdated the popup shows
  * the gate and nothing else: every control below it acts on a store the write path is refusing to
@@ -67,8 +68,7 @@ export default function App() {
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [facts, setFacts] = useState<PopupFacts | null>(null);
   const [rememberedDepth, setRememberedDepth] = useState<ExportDepthMinutes | null>(null);
-  const [feedback, setFeedback] = useState<CopyFeedbackView>(IDLE_FEEDBACK);
-  const [retryDepth, setRetryDepth] = useState<ExportDepthMinutes | null>(null);
+  const [feedback, setFeedback] = useState<ExportFeedbackView>(IDLE_FEEDBACK);
   const [busy, setBusy] = useState(false);
 
   /**
@@ -161,12 +161,12 @@ export default function App() {
   }
 
   /**
-   * One export, from the click to the clipboard.
+   * One export, from the click to the file.
    *
-   * The write is the last statement of the handler, and nothing is awaited between it and the
-   * report coming back: `writeText` runs on the transient activation the click granted, and that
-   * activation expires. A slow worker can therefore cost the copy — which is precisely why the
-   * outcome is rendered instead of assumed (`export/clipboard.ts:10`).
+   * How long the worker takes no longer matters. The clipboard write this replaced ran on the
+   * transient activation the click granted, so a slow answer cost the export outright and the order
+   * of everything below was dictated by not spending it. A blob and an anchor depend on no
+   * activation (`export/download.ts:12`), which leaves this handler free to be read top to bottom.
    */
   async function exportReport(depthMinutes: ExportDepthMinutes): Promise<void> {
     const subject = facts?.subject;
@@ -176,7 +176,6 @@ export default function App() {
     }
 
     setBusy(true);
-    setRetryDepth(null);
     setFeedback(workingFeedback(depthMinutes));
 
     const answer: unknown = await browser.runtime
@@ -190,14 +189,12 @@ export default function App() {
     }
 
     const { bundle, markdown } = answer as ExportResult;
-    const outcome = await copyToClipboard(markdown);
-    setFeedback(copyAcknowledgement(bundle, outcome));
-    setRetryDepth(outcome.ok ? null : depthMinutes);
+    const filename = reportFilename(bundle);
+    setFeedback(downloadAcknowledgement(bundle, filename, downloadReport(markdown, filename)));
     setBusy(false);
 
-    // After the clipboard, never before it: this is a preference, and no preference is worth
-    // spending the transient activation the copy runs on. Not awaited either, for the same reason
-    // the state is updated here rather than on the next open — the label follows the click.
+    // Not awaited: the label follows the click rather than the next open, and a preference that has
+    // not reached disk yet must not hold up the acknowledgement of a file already written.
     setRememberedDepth(depthMinutes);
     void writeLastDepth(depthMinutes);
   }
@@ -252,11 +249,7 @@ export default function App() {
             onExport={(depth) => void exportReport(depth)}
           />
           <TabContextLine text={tabContextLine(facts)} />
-          <CopyFeedback
-            feedback={feedback}
-            retryDepth={retryDepth}
-            onRetry={(depth) => void exportReport(depth)}
-          />
+          <ExportFeedback feedback={feedback} />
         </>
       ) : null}
 
