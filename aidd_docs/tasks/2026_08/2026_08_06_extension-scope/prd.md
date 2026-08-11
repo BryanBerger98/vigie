@@ -23,7 +23,7 @@ Trois coûts se cumulent aujourd'hui :
 | Objectif | Preuve observable |
 |---|---|
 | Produire un rapport sans avoir rejoué le bug | L'export réussit sur un bug survenu avant toute action de l'utilisateur |
-| Réduire l'export à un geste | Choix de la fenêtre puis clic : rien d'autre entre le bug et le presse-papier |
+| Réduire l'export à un geste | Choix de la fenêtre puis clic : rien d'autre entre le bug et le fichier téléchargé |
 | Rendre le rapport directement exploitable par un agent IA | Un agent répond à « que s'est-il passé ? » à partir du seul bundle collé, sans reformatage |
 | Cantonner strictement l'observation | Un domaine non désigné ne produit aucune donnée stockée ni exportable |
 | Garder la donnée sur la machine | Aucune requête sortante émise par l'extension |
@@ -71,7 +71,7 @@ Trois coûts se cumulent aujourd'hui :
 - Choisir une profondeur et cliquer suffit : aucun champ à remplir, aucune étape supplémentaire.
 - Le bundle est figé au moment du clic ; ce qui arrive après n'y entre pas.
 - Tout ce qui tombe dans la fenêtre est exporté, sans tri ni filtrage.
-- Le rapport part au presse-papier, dans un format unique.
+- Le rapport part dans un fichier Markdown téléchargé, dans un format unique.
 
 **Contenu du rapport**
 

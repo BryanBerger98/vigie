@@ -33,7 +33,7 @@ flowchart TD
 - `apps/extension/src/entrypoints/`: the WXT convention directory. Every browser-registered surface starts here and nowhere else.
 - `apps/extension/src/capture/`: one subdirectory per capture layer (`video/`, `network/`, `cdp/`, `sdk-bridge/`). Adding a source means adding a sibling, not branching inside an existing one.
 - `apps/extension/src/storage/`: `db.ts` for the Dexie schema and the one-hour context pruning, `opfs.ts` for the segments of a running recording. The watched-domain filter sits on the write path here, so unwatched traffic never reaches disk. See `database.md`.
-- `apps/extension/src/export/`: report assembly, the Markdown rendering an AI consumes, and clipboard output.
+- `apps/extension/src/export/`: report assembly, the Markdown rendering an AI consumes, and the download that writes it to a file.
 - `apps/extension/src/consent/`: the first-run consent screen. A Chrome Web Store requirement, not a UX nicety.
 - `apps/extension/src/ui/`: shared React components across popup, side panel, and options.
 - `apps/extension/src/shared/chrome-apis.d.ts`: local declarations for the MV3 surfaces Chrome's typings still miss.

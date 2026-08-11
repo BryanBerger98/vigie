@@ -2,7 +2,7 @@
 
 ## Cible
 
-Permettre à un utilisateur de placer dans son presse-papier, en un clic et sans avoir reproduit le bug, un rapport Markdown du contexte technique de l'onglet actif — trafic réseau, sorties console, erreurs JS — sur une fenêtre de temps qu'il choisit jusqu'à 60 minutes, pour les seuls domaines qu'il a désignés.
+Permettre à un utilisateur de télécharger, en un clic et sans avoir reproduit le bug, un rapport Markdown du contexte technique de l'onglet actif — trafic réseau, sorties console, erreurs JS — sur une fenêtre de temps qu'il choisit jusqu'à 60 minutes, pour les seuls domaines qu'il a désignés.
 
 ## Contraintes fermes
 
@@ -12,7 +12,7 @@ Permettre à un utilisateur de placer dans son presse-papier, en un clic et sans
 - Ce qui date de plus d'une heure n'est ni exportable ni conservé : le stockage ne croît pas sans borne.
 - Un export porte sur l'onglet actif seul et n'exige aucune saisie humaine : choisir une profondeur, cliquer, rien d'autre.
 - Le bundle est figé à l'instant du clic ; ce qui survient après n'y entre pas. Tout ce qui tombe dans la fenêtre part sans tri ni filtrage.
-- Un seul format de sortie, identique quel que soit le destinataire, remis au presse-papier.
+- Un seul format de sortie, identique quel que soit le destinataire, écrit dans un fichier téléchargé.
 - Un écran de consentement précède toute capture au premier lancement et énonce ce qui est capté, payloads réseau bruts et contenu console compris. C'est une condition de publication sur le Chrome Web Store, pas un choix d'ergonomie.
 - L'utilisateur peut à tout moment consulter ce qui est stocké, le purger, et retirer un domaine — ce qui arrête sa capture et supprime ce qui avait été capté pour lui.
 - Une heure de capture sur une application réelle ne dégrade pas la navigation de façon perceptible.
@@ -38,7 +38,7 @@ Permettre à un utilisateur de placer dans son presse-papier, en un clic et sans
 ## Terminé quand
 
 - Un export lancé sur un bug déjà survenu, sans qu'aucune action n'ait précédé, produit un rapport couvrant la période demandée.
-- Choisir une profondeur puis cliquer place le rapport dans le presse-papier ; aucun champ n'est demandé, aucune étape ne s'intercale.
+- Choisir une profondeur puis cliquer écrit le rapport dans le dossier de téléchargements ; aucun champ n'est demandé, aucune étape ne s'intercale.
 - Le rapport contient le trafic réseau, les sorties console et les erreurs JS de la fenêtre, horodatés et ordonnés, indique la fenêtre couverte, le domaine et l'onglet concernés, et signale explicitement tout corps de réponse indisponible plutôt que de l'omettre.
 - Un agent IA répond à « que s'est-il passé ? » à partir du seul rapport collé, sans reformatage préalable.
 - Un domaine jamais désigné ne laisse aucune donnée stockée ni exportable ; retirer un domaine arrête sa capture et efface ce qui le concernait.

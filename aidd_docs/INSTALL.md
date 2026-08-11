@@ -29,7 +29,7 @@ These are not stack choices, but they shaped the architecture and must not be si
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `chrome.tabCapture` requires a per-tab user gesture | Video is a user-bounded recording — start, stop, download — not a buffer. The gesture requirement is satisfied by the start button, so it stops being a constraint. The "always-on invisible recorder" is not achievable under Chrome's security model, and is not attempted. |
 | Capture scope                       | Context capture runs **only on domains the user added** in the options. This bounds storage, consent disclosure, and the blast radius of a leaked export. The permission mechanism behind it — required host permissions versus optional ones requested per domain — is still open. |
-| Export shape                        | One click, active tab only, over a window of 5, 15, 30, or 60 minutes. One hour is a hard ceiling. Everything inside the window ships unsorted; the user writes nothing. Text goes to the clipboard, video downloads separately. |
+| Export shape                        | One click, active tab only, over a window of 5, 15, 30, or 60 minutes. One hour is a hard ceiling. Everything inside the window ships unsorted; the user writes nothing. Text downloads as a Markdown file, video downloads separately. |
 | First slice                         | Browser context only: `webRequest`, console, rolling storage, Markdown export. No SDK, no video, no CDP. Proves the report carries value before the expensive surfaces are built. |
 | Capture strategy                    | Three layers: SDK (primary) + `chrome.webRequest` (observation) + `chrome.debugger` (opt-in via `optional_permissions`). Each covers the others' blind spots. |
 | Redaction                           | **Deliberately out of scope for the MVP.** Raw export, accepted risk. Tracked as identified v2 debt.       |
@@ -73,7 +73,7 @@ flowchart LR
         idb["🗂️ IndexedDB / Dexie<br/>contexte · réseau · console"]
     end
 
-    out["📤 Export<br/>texte → presse-papier<br/>vidéo → téléchargement"]
+    out["📤 Export<br/>texte → fichier .md<br/>vidéo → téléchargement"]
 
     sdk -->|"postMessage"| cs
     cs -->|"runtime.sendMessage"| sw
@@ -125,7 +125,8 @@ vigie/
 │       │   ├── export/
 │       │   │   ├── bundle.ts            # report assembly
 │       │   │   ├── markdown.ts          # AI-consumable format
-│       │   │   └── clipboard.ts
+│       │   │   ├── download.ts          # blob + anchor, no permission
+│       │   │   └── filename.ts          # vigie-<domain>-<date>-<time>.md
 │       │   ├── consent/                 # first-run consent screen, CWS requirement
 │       │   ├── ui/                      # shared React components
 │       │   └── shared/
