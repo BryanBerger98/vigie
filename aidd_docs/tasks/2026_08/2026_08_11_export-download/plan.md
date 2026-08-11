@@ -1,6 +1,6 @@
 ---
 title: L'export devient un fichier téléchargé
-status: in-progress
+status: implemented
 updated: 2026-08-11
 owner: bryan
 ---
@@ -54,6 +54,10 @@ C'est une affirmation à vérifier, pas à supposer.
 Le test de bout en bout attend l'événement `download` et lit le fichier : il tranche.
 S'il ne vient pas, le repli est `chrome.downloads`, c'est-à-dire la permission écartée plus haut — donc un retour vers l'utilisateur, pas une décision prise seul.
 Dans le code, la révocation du blob URL reste différée, jamais synchrone après le clic.
+
+> [!NOTE]
+> **Tranché le 2026-08-11 : le blob tient.** L'événement `download` arrive, le fichier est écrit, son contenu est relu et confronté au rapport attendu — suite complète verte, 74 tests.
+> L'ancre n'a même pas besoin d'être attachée au document. `chrome.downloads` n'est pas sollicité, le manifest ne bouge pas.
 
 ## 📄 Le nom du fichier
 
