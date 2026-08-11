@@ -326,10 +326,14 @@ test('shows a refused clipboard rather than letting it pass for a copy', async (
 
   await popup.getByTestId('export-run').click();
 
-  await expect(popup.getByTestId('export-status')).toContainText(
-    'Report ready but not copied: clipboard blocked by policy',
-    { timeout: 15_000 },
+  const status = popup.getByTestId('export-status');
+  await expect(status).toHaveAttribute('data-state', 'failed', { timeout: 15_000 });
+  await expect(popup.getByTestId('export-status-headline')).toContainText('Not copied');
+  await expect(popup.getByTestId('export-status-detail')).toContainText(
+    'clipboard blocked by policy',
   );
+  // The headline is what a reader takes away, so it must not be readable as a success anywhere.
+  await expect(status).not.toContainText('Copied ');
   // A retry is a new click and therefore a new transient activation — the thing the write lacked.
   await expect(popup.getByTestId('copy-retry')).toBeVisible();
 });

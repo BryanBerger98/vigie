@@ -220,35 +220,87 @@ export function tabContextLine(facts: PopupFacts): string {
 }
 
 /**
+ * Where the export is, from the point of view of someone who cannot see the clipboard.
+ *
+ * Four states rather than one sentence that keeps changing. A copy leaves no visible trace anywhere
+ * — not on the page, not on the button, not in the clipboard the user cannot open — so the only
+ * proof the click worked is this block. It had none of the marks of an event: idle, working,
+ * copied and refused all rendered as the same grey line, under a context line rendered the same
+ * way again. A reader had to compare wordings to find out whether anything had happened.
+ */
+export type CopyFeedbackKind = 'idle' | 'working' | 'copied' | 'failed';
+
+export interface CopyFeedbackView {
+  kind: CopyFeedbackKind;
+  /** What happened, in the few words that carry the state on their own (`design.md:28`). */
+  headline: string;
+  /** What the headline has no room for. Empty when there is nothing to add. */
+  detail: string;
+}
+
+/** Before any click. Says the gesture exists, and does not pretend anything has been copied. */
+export const IDLE_FEEDBACK: CopyFeedbackView = {
+  kind: 'idle',
+  headline: 'Nothing copied yet',
+  detail: 'One click, and the report goes straight to the clipboard.',
+};
+
+/** Between the click and the answer. The depth is repeated: it is what the wait is for. */
+export function workingFeedback(depthMinutes: ExportDepthMinutes): CopyFeedbackView {
+  return { kind: 'working', headline: `Cutting the last ${depthMinutes} min…`, detail: '' };
+}
+
+/** The export never reached the clipboard, and the reason is the browser's own words. */
+export function exportFailure(reason: string): CopyFeedbackView {
+  return { kind: 'failed', headline: 'Export failed', detail: reason };
+}
+
+/**
  * What the user is told they just took away.
  *
  * Three things have to survive the copy, and none of them is visible in the clipboard: how deep
  * the report really goes, whether it holds anything at all, and what it structurally cannot show.
- * A depth is only mentioned when it differs from the one asked for — repeating "5 min" after a
- * five-minute click is noise that trains the reader to skip the line where it matters.
+ * The headline holds the first answer a user wants — did it copy, and how much — and the detail
+ * holds the qualifications. A depth is only mentioned when it differs from the one asked for:
+ * repeating "5 min" after a five-minute click is noise that trains the reader to skip the line
+ * where it matters.
  */
-export function copyAcknowledgement(bundle: ReportBundle, outcome: CopyOutcome): string {
-  if (!outcome.ok) return `Report ready but not copied: ${outcome.reason}`;
+export function copyAcknowledgement(bundle: ReportBundle, outcome: CopyOutcome): CopyFeedbackView {
+  if (!outcome.ok) {
+    return {
+      kind: 'failed',
+      headline: 'Not copied',
+      detail: `The report is ready, but the clipboard refused it: ${outcome.reason}`,
+    };
+  }
 
   const { requestedDepthMinutes, coveredDepthMinutes } = bundle.window;
   const count = bundle.entries.length;
 
-  const copied =
-    count === 0
-      ? `Copied an empty report: nothing was captured on this tab in the last ${minutes(requestedDepthMinutes)} min.`
-      : `Copied ${count} ${count === 1 ? 'entry' : 'entries'}.`;
+  const empty = count === 0;
+  const headline = empty
+    ? 'Copied an empty report'
+    : `Copied ${count} ${count === 1 ? 'entry' : 'entries'}`;
+
+  const nothing = empty
+    ? `Nothing was captured on this tab in the last ${minutes(requestedDepthMinutes)} min.`
+    : '';
 
   // A tenth of a minute of slack: the covered depth is a measured duration, and the two are equal
   // in every way a reader cares about long before they are equal as floats.
   const shorter =
     coveredDepthMinutes < requestedDepthMinutes - 0.05
-      ? ` It covers ${minutes(Number(coveredDepthMinutes.toFixed(1)))} min, not the ${requestedDepthMinutes} min asked: the capture does not reach further back.`
+      ? `It covers ${minutes(Number(coveredDepthMinutes.toFixed(1)))} min, not the ${requestedDepthMinutes} min asked: the capture does not reach further back.`
       : '';
 
   const gaps =
     bundle.gaps.length === 0
       ? ''
-      : ` Declared in the report: ${bundle.gaps.map((gap) => GAP_SUMMARIES[gap.kind]).join(', ')}.`;
+      : `Declared in the report: ${bundle.gaps.map((gap) => GAP_SUMMARIES[gap.kind]).join(', ')}.`;
 
-  return `${copied}${shorter}${gaps}`;
+  return {
+    kind: 'copied',
+    headline,
+    detail: [nothing, shorter, gaps].filter((part) => part.length > 0).join(' '),
+  };
 }

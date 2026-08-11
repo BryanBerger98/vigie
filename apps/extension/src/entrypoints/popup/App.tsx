@@ -29,12 +29,16 @@ import { TabContextLine } from './TabContextLine';
 import { readLastDepth, writeLastDepth } from './last-depth';
 import { resolveSubjectTab } from './subject-tab';
 import {
+  IDLE_FEEDBACK,
   MS_PER_MINUTE,
   copyAcknowledgement,
   depthAvailability,
+  exportFailure,
   resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
+  workingFeedback,
+  type CopyFeedbackView,
   type PopupFacts,
 } from './state';
 
@@ -59,14 +63,11 @@ import {
  * popup mounted and predates this phase.
  */
 
-/** What the acknowledgement shows before anything has been clicked. */
-const IDLE_FEEDBACK = 'One click, and the report goes straight to the clipboard.';
-
 export default function App() {
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [facts, setFacts] = useState<PopupFacts | null>(null);
   const [rememberedDepth, setRememberedDepth] = useState<ExportDepthMinutes | null>(null);
-  const [feedback, setFeedback] = useState<string>(IDLE_FEEDBACK);
+  const [feedback, setFeedback] = useState<CopyFeedbackView>(IDLE_FEEDBACK);
   const [retryDepth, setRetryDepth] = useState<ExportDepthMinutes | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -170,20 +171,20 @@ export default function App() {
   async function exportReport(depthMinutes: ExportDepthMinutes): Promise<void> {
     const subject = facts?.subject;
     if (!subject) {
-      setFeedback('No web page in this window to report on.');
+      setFeedback(exportFailure('This window has no web page to report on.'));
       return;
     }
 
     setBusy(true);
     setRetryDepth(null);
-    setFeedback(`Cutting the last ${depthMinutes} min…`);
+    setFeedback(workingFeedback(depthMinutes));
 
     const answer: unknown = await browser.runtime
       .sendMessage(exportRequest(subject.tabId, depthMinutes))
       .catch((error: unknown) => ({ error: String(error) }));
 
     if (isExportFailure(answer)) {
-      setFeedback(`Export failed: ${answer.error}`);
+      setFeedback(exportFailure(answer.error));
       setBusy(false);
       return;
     }
@@ -252,7 +253,7 @@ export default function App() {
           />
           <TabContextLine text={tabContextLine(facts)} />
           <CopyFeedback
-            text={feedback}
+            feedback={feedback}
             retryDepth={retryDepth}
             onRetry={(depth) => void exportReport(depth)}
           />

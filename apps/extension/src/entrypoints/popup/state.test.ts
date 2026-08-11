@@ -5,11 +5,14 @@ import { RETENTION_MS } from '@/storage/prune';
 
 import {
   DEFAULT_EXPORT_DEPTH_MINUTES,
+  IDLE_FEEDBACK,
   copyAcknowledgement,
   depthAvailability,
+  exportFailure,
   resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
+  workingFeedback,
   type PopupFacts,
 } from './state';
 
@@ -180,39 +183,71 @@ function bundle(overrides: Partial<ReportBundle['window']> = {}, entries = 3): R
 }
 
 describe('copyAcknowledgement', () => {
-  it('stays quiet about the depth when it is the one that was asked for', () => {
-    const text = copyAcknowledgement(bundle(), { ok: true });
+  it('puts the outcome in the headline, where nothing else competes with it', () => {
+    const view = copyAcknowledgement(bundle(), { ok: true });
 
-    expect(text).toContain('Copied 3 entries.');
-    expect(text).not.toContain('not the 15 min');
+    expect(view.kind).toBe('copied');
+    expect(view.headline).toBe('Copied 3 entries');
+  });
+
+  it('stays quiet about the depth when it is the one that was asked for', () => {
+    expect(copyAcknowledgement(bundle(), { ok: true }).detail).not.toContain('not the 15 min');
   });
 
   it('announces the delivered depth when it is shorter than the one requested', () => {
-    const text = copyAcknowledgement(
+    const view = copyAcknowledgement(
       bundle({ requestedDepthMinutes: 60, coveredDepthMinutes: 22.36 }),
       { ok: true },
     );
 
-    expect(text).toContain('covers 22.4 min, not the 60 min asked');
+    expect(view.detail).toContain('covers 22.4 min, not the 60 min asked');
   });
 
   it('says the report is empty rather than reporting a successful copy of nothing', () => {
-    const text = copyAcknowledgement(bundle({}, 0), { ok: true });
+    const view = copyAcknowledgement(bundle({}, 0), { ok: true });
 
-    expect(text).toContain('Copied an empty report');
-    expect(text).toContain('last 15 min');
+    expect(view.headline).toBe('Copied an empty report');
+    expect(view.detail).toContain('last 15 min');
   });
 
   it('summarises the gaps the report declares', () => {
-    expect(copyAcknowledgement(bundle(), { ok: true })).toContain(
+    expect(copyAcknowledgement(bundle(), { ok: true }).detail).toContain(
       'Declared in the report: no response bodies.',
     );
   });
 
   it('reports a refused clipboard instead of a copy', () => {
-    const text = copyAcknowledgement(bundle(), { ok: false, reason: 'blocked by policy' });
+    const view = copyAcknowledgement(bundle(), { ok: false, reason: 'blocked by policy' });
 
-    expect(text).toBe('Report ready but not copied: blocked by policy');
-    expect(text).not.toContain('Copied');
+    expect(view.kind).toBe('failed');
+    expect(view.headline).toBe('Not copied');
+    expect(view.detail).toContain('blocked by policy');
+  });
+
+  it('never says copied on a refusal, whichever line a reader lands on', () => {
+    const view = copyAcknowledgement(bundle(), { ok: false, reason: 'blocked by policy' });
+
+    expect(`${view.headline} ${view.detail}`).not.toContain('Copied');
+  });
+});
+
+describe('the states that surround an acknowledgement', () => {
+  it('opens on nothing copied, rather than on a line that could be read as a receipt', () => {
+    expect(IDLE_FEEDBACK.kind).toBe('idle');
+    expect(IDLE_FEEDBACK.headline).toBe('Nothing copied yet');
+  });
+
+  it('names the depth being cut while the export runs', () => {
+    const view = workingFeedback(30);
+
+    expect(view.kind).toBe('working');
+    expect(view.headline).toContain('30 min');
+  });
+
+  it('carries a failed export as a failure, not as an acknowledgement', () => {
+    const view = exportFailure('the worker never answered');
+
+    expect(view.kind).toBe('failed');
+    expect(view.detail).toBe('the worker never answered');
   });
 });

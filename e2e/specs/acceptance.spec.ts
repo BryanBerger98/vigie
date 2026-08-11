@@ -308,8 +308,18 @@ test('a depth and a click, and the report is on the clipboard', async ({ context
   // "aucune étape ne s'intercale": one click, and the next thing that happens is the copy. The
   // depth is on the button before it is pressed, so choosing one is not a step either.
   await expect(popup.getByTestId('export-run')).toContainText('Export 5 min');
+
+  // Before the click, the block must not read as a receipt for something that never happened.
+  const status = popup.getByTestId('export-status');
+  await expect(status).toHaveAttribute('data-state', 'idle');
+
   await popup.getByTestId('export-run').click();
-  await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+
+  // The copy leaves no other visible trace — not on the page, not on the button, and the clipboard
+  // cannot be opened to check — so the acknowledgement is the only proof the click worked. It has
+  // to change state, and say so in words as well as in colour (`design.md:28`).
+  await expect(status).toHaveAttribute('data-state', 'copied', { timeout: 15_000 });
+  await expect(popup.getByTestId('export-status-headline')).toContainText('Copied');
 });
 
 /**
@@ -338,9 +348,9 @@ test('the report names the window, the domain and the tab, and declares its gaps
   const { bundle, markdown } = await requestExport(options, tabId, 15);
 
   expect(markdown).toContain(`# Vigie report — ${site.host}`);
-  expect(markdown).toContain(`| Subject | ${site.host}, tab ${tabId} |`);
-  expect(markdown).toContain(`| URL | ${site.origin}/noisy |`);
-  expect(markdown).toContain('| Window | 15 min requested,');
+  expect(markdown).toContain(`tab ${tabId} |`);
+  expect(markdown).toContain(`| **URL** | ${site.origin}/noisy |`);
+  expect(markdown).toContain('min covered of 15 requested');
 
   const kinds = new Set(bundle!.entries.map((entry) => entry.kind));
   expect(kinds.has('network')).toBe(true);
@@ -352,9 +362,9 @@ test('the report names the window, the domain and the tab, and declares its gaps
   // The gaps are declared, and once per request rather than once per report: an absence stated in
   // the header and then omitted from the entries is an absence a reader stops seeing.
   const requests = bundle!.entries.filter((entry) => entry.kind === 'network').length;
-  expect(markdown).toContain('## What this report does not contain');
+  expect(markdown).toContain('## What this report cannot show');
   expect(markdown).toContain('Response bodies are not included.');
-  expect(markdown!.split('Response body: not available.').length - 1).toBe(requests);
+  expect(markdown!.split('· no response body').length - 1).toBe(requests);
 });
 
 /**

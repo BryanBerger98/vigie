@@ -91,29 +91,29 @@ describe('a report a reader can act on', () => {
     expect(renderReport(bundle({ entries: [REQUEST, LOG, FAILURE] }))).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **1 anomaly** in 15 min of capture. Search \`🛑\` to reach them.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 1 |
-      | Console | 1 |
-      | JS errors | 1 |
-      | Anomalies | 1 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 1 |
+      | **Console** | 1 |
+      | **JS errors** | 1 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
-      ### 2026-08-07T09:24:00.000Z · network · POST /api/cart?currency=EUR → 201
+      ### 🌐 \`POST /api/cart\` → ✅ \`201 Created\`
 
-      https://example.com/api/cart?currency=EUR · completed 201 in 84 ms · xmlhttprequest
+      > 🔗 [\`https://example.com/api/cart?currency=EUR\`](<https://example.com/api/cart?currency=EUR>)  
+      > 🕑 \`2026-08-07T09:24:00.000Z\` · ⏱ \`84 ms\` · 📄 \`xmlhttprequest\` · no response body
 
       <details><summary>Request headers (2)</summary>
 
@@ -124,7 +124,7 @@ describe('a report a reader can act on', () => {
 
       </details>
 
-      Request body:
+      <details><summary>Request body</summary>
 
       \`\`\`json
       {
@@ -132,6 +132,8 @@ describe('a report a reader can act on', () => {
         "qty": 2
       }
       \`\`\`
+
+      </details>
 
       <details><summary>Response headers (1)</summary>
 
@@ -141,16 +143,18 @@ describe('a report a reader can act on', () => {
 
       </details>
 
-      Response body: not available.
+      ### ⚠️ \`console.warn\` — cart total mismatch
 
-      ### 2026-08-07T09:25:00.000Z · console · warn · cart total mismatch
+      > 🕑 \`2026-08-07T09:25:00.000Z\`
 
       \`\`\`text
       cart total mismatch
       expected 24.00, got 22.00
       \`\`\`
 
-      ### [!] 2026-08-07T09:26:00.000Z · error · uncaught · TypeError: total.toFixed is not a function
+      ### 🛑 \`uncaught\` — TypeError: total.toFixed is not a function
+
+      > 🕑 \`2026-08-07T09:26:00.000Z\`
 
       \`\`\`text
       TypeError: total.toFixed is not a function
@@ -173,23 +177,22 @@ describe('a window with nothing in it', () => {
     expect(renderReport(bundle())).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **Nothing failed** in 15 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 0 |
-      | Console | 0 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 0 |
+      | **Console** | 0 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
@@ -220,29 +223,30 @@ describe('a capture shorter than the window asked for', () => {
     expect(renderReport(short)).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **Nothing failed** in 20.4 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 60 min requested, 20.4 min covered |
-      | Period | 2026-08-07T08:27:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 0 |
-      | Console | 1 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T08:27:00.000Z → 2026-08-07T09:27:00.000Z · 20.4 min covered of 60 requested |
+      | **Network** | 0 |
+      | **Console** | 1 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
-      - Capture began after this page had loaded, because its domain was added or the extension was installed while the tab was already open. Nothing emitted before that point exists; reload the page to cover a full load.
-      - The window covered is shorter than the one requested: storage pressure forced the oldest entries out before the hour was up.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **Nothing before the page had loaded.** Capture began after this page had loaded, because its domain was added or the extension was installed while the tab was already open. Nothing emitted before that point exists; reload the page to cover a full load.
+      - **Window shortened by storage pressure.** The window covered is shorter than the one requested: storage pressure forced the oldest entries out before the hour was up.
 
       ## Timeline
 
-      ### 2026-08-07T09:25:00.000Z · console · warn · cart total mismatch
+      ### ⚠️ \`console.warn\` — cart total mismatch
+
+      > 🕑 \`2026-08-07T09:25:00.000Z\`
 
       \`\`\`text
       cart total mismatch
@@ -271,31 +275,29 @@ describe('a request that did not complete', () => {
     expect(renderReport(bundle({ entries: [failed] }))).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **1 anomaly** in 15 min of capture. Search \`🛑\` to reach them.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 1 (1 failed) |
-      | Console | 0 |
-      | JS errors | 0 |
-      | Anomalies | 1 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 1 — 1 failed |
+      | **Console** | 0 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
-      ### [!] 2026-08-07T09:26:00.000Z · network · GET /api/prices → failed
+      ### 🛑 \`GET /api/prices\` → 💥 \`net::ERR_CONNECTION_RESET\`
 
-      https://example.com/api/prices · failed in 12004 ms: net::ERR_CONNECTION_RESET
-
-      Response body: not available."
+      > 🔗 [\`https://example.com/api/prices\`](<https://example.com/api/prices>)  
+      > 🕑 \`2026-08-07T09:26:00.000Z\` · ⏱ \`12.0 s\` · no response body"
     `);
   });
 
@@ -316,31 +318,29 @@ describe('a request that did not complete', () => {
     expect(renderReport(bundle({ entries: [pending] }))).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **Nothing failed** in 15 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 1 |
-      | Console | 0 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 1 |
+      | **Console** | 0 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
-      ### 2026-08-07T09:26:00.000Z · network · GET /stream → pending
+      ### 🌐 \`GET /stream\` → ⏳ \`still open\`
 
-      https://example.com/stream · still open when the report was cut · xmlhttprequest
-
-      Response body: not available."
+      > 🔗 [\`https://example.com/stream\`](<https://example.com/stream>)  
+      > 🕑 \`2026-08-07T09:26:00.000Z\` · 📄 \`xmlhttprequest\` · no response body"
     `);
   });
 });
@@ -360,37 +360,37 @@ describe('a body the report cannot reformat', () => {
     expect(renderReport(bundle({ entries: [malformed] }))).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **Nothing failed** in 15 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 1 |
-      | Console | 0 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 1 |
+      | **Console** | 0 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
-      ### 2026-08-07T09:24:00.000Z · network · POST /api/cart?currency=EUR → 201
+      ### 🌐 \`POST /api/cart\` → ✅ \`201 Created\`
 
-      https://example.com/api/cart?currency=EUR · completed 201 in 84 ms · xmlhttprequest
+      > 🔗 [\`https://example.com/api/cart?currency=EUR\`](<https://example.com/api/cart?currency=EUR>)  
+      > 🕑 \`2026-08-07T09:24:00.000Z\` · ⏱ \`84 ms\` · 📄 \`xmlhttprequest\` · no response body
 
-      Request body, malformed JSON left exactly as it was received:
+      <details><summary>Request body — malformed JSON, left exactly as it was received</summary>
 
       \`\`\`text
       {"sku":"A-1","qty":
       \`\`\`
 
-      Response body: not available."
+      </details>"
     `);
   });
 
@@ -405,7 +405,7 @@ describe('a body the report cannot reformat', () => {
 
     const markdown = renderReport(bundle({ entries: [form] }));
 
-    expect(markdown).toContain('Request body:');
+    expect(markdown).toContain('<summary>Request body</summary>');
     expect(markdown).not.toContain('malformed');
     expect(markdown).toContain('```text\nsku=A-1&qty=2\n```');
   });
@@ -418,33 +418,32 @@ describe('what the capture had to cut', () => {
     expect(renderReport(bundle({ entries: [truncated] }))).toMatchInlineSnapshot(`
       "# Vigie report — example.com
 
-      | Field | Value |
+      **Nothing failed** in 15 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | example.com, tab 42 |
-      | URL | https://example.com/checkout |
-      | Title | Checkout |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 0 |
-      | Console | 1 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | Checkout · tab 42 |
+      | **URL** | https://example.com/checkout |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 0 |
+      | **Console** | 1 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
-      ### 2026-08-07T09:25:00.000Z · console · warn · huge payload
+      ### ⚠️ \`console.warn\` — huge payload
+
+      > 🕑 \`2026-08-07T09:25:00.000Z\` · truncated by the capture
 
       \`\`\`text
       huge payload
-      \`\`\`
-
-      (text truncated by the capture)"
+      \`\`\`"
     `);
   });
 });
@@ -459,22 +458,22 @@ describe('a subject the tab could not name', () => {
     expect(renderReport(unnamed)).toMatchInlineSnapshot(`
       "# Vigie report — (unknown)
 
-      | Field | Value |
+      **Nothing failed** in 15 min of capture.
+
+      | | |
       | --- | --- |
-      | Subject | (unknown), tab 42 |
-      | URL | (unknown) |
-      | Window | 15 min requested, 15 min covered |
-      | Period | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z |
-      | Network | 0 |
-      | Console | 0 |
-      | JS errors | 0 |
-      | Anomalies | 0 |
-      | Produced by | Vigie 0.1.0, report schema 1 |
+      | **Page** | tab 42 |
+      | **URL** | (unknown) |
+      | **Window** | 2026-08-07T09:12:00.000Z → 2026-08-07T09:27:00.000Z · 15 min covered of 15 requested |
+      | **Network** | 0 |
+      | **Console** | 0 |
+      | **JS errors** | 0 |
+      | **Produced by** | Vigie 0.1.0 · report schema 1 |
 
-      ## What this report does not contain
+      ## What this report cannot show
 
-      - Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
-      - Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
 
       ## Timeline
 
@@ -508,30 +507,30 @@ describe('reaching the anomalies without reading the report', () => {
   }
 
   it('marks the anomalous entries and only those', () => {
-    const marked = titles(renderReport(mixed)).map((title) => title.startsWith('### [!] '));
+    const marked = titles(renderReport(mixed)).map((title) => title.startsWith('### 🛑 '));
 
     // failed, 503, the healthy 201, a warning, an error log, an uncaught failure.
     expect(marked).toEqual([true, true, false, false, true, true]);
   });
 
-  it('counts in the framing table exactly what the timeline marks', () => {
+  it('counts in the framing exactly what the timeline marks', () => {
     const markdown = renderReport(mixed);
-    const marked = titles(markdown).filter((title) => title.startsWith('### [!] ')).length;
+    const marked = titles(markdown).filter((title) => title.startsWith('### 🛑 ')).length;
 
-    expect(markdown).toContain('| Anomalies | 4 |');
-    expect(markdown).toContain('| Network | 3 (1 failed, 1 with status ≥ 400) |');
-    expect(markdown).toContain('| Console | 2 (1 error) |');
-    expect(markdown).toContain('| JS errors | 1 |');
+    expect(markdown).toContain('**4 anomalies** in 15 min of capture. Search `🛑` to reach them.');
+    expect(markdown).toContain('| **Network** | 3 — 1 failed, 1 with status ≥ 400 |');
+    expect(markdown).toContain('| **Console** | 2 — 1 error |');
+    expect(markdown).toContain('| **JS errors** | 1 |');
     expect(marked).toBe(4);
   });
 
-  it('drops the parenthesis when a kind holds no anomaly at all', () => {
+  it('says nothing failed rather than leaving a zero to be noticed', () => {
     const clean = renderReport(bundle({ entries: [REQUEST, LOG] }));
 
-    expect(clean).toContain('| Network | 1 |');
-    expect(clean).toContain('| Console | 1 |');
-    expect(clean).toContain('| Anomalies | 0 |');
-    expect(clean).not.toContain('[!]');
+    expect(clean).toContain('**Nothing failed** in 15 min of capture.');
+    expect(clean).toContain('| **Network** | 1 |');
+    expect(clean).toContain('| **Console** | 1 |');
+    expect(clean).not.toContain('🛑');
   });
 });
 
@@ -548,8 +547,8 @@ describe('a value that would break the table it sits in', () => {
 
     const markdown = renderReport(piped);
 
-    expect(markdown).toContain('| URL | https://example.com/search?q=a\\|b |');
-    expect(markdown).toContain('| Title | a \\| b |');
+    expect(markdown).toContain('| **URL** | https://example.com/search?q=a\\|b |');
+    expect(markdown).toContain('| **Page** | a \\| b · tab 42 |');
   });
 });
 

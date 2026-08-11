@@ -160,18 +160,26 @@ async function watchedTab(
 }
 
 /**
- * The section titles of the timeline, read back as instants.
+ * The instants of the timeline, in the order a reader meets them.
  *
- * One title per entry, each opening on a full timestamp and possibly carrying the anomaly marker
- * before it. Matching the title rather than any line holding a date is what keeps a timestamp
- * appearing inside a captured body out of the count.
+ * One per entry, taken from the quoted meta block that opens each section rather than from any line
+ * that happens to hold a date — a captured body carrying a timestamp of its own must not enter the
+ * count. Anchoring on the heading above it is what makes that distinction: the block scanned is the
+ * one that follows a `###` and stops at the first line that is no longer quoted.
  */
 function timelineStamps(markdown: string): number[] {
-  return markdown
-    .split('\n')
-    .map((line) => /^### (?:\[!] )?(\d{4}-\d{2}-\d{2}T[\d:.]+Z) · /.exec(line))
-    .filter((match) => match !== null)
-    .map((match) => Date.parse(match[1]!));
+  const lines = markdown.split('\n');
+  const stamps: number[] = [];
+
+  lines.forEach((line, index) => {
+    if (!line.startsWith('### ')) return;
+
+    const quoted = lines.slice(index + 1, index + 5).filter((below) => below.startsWith('> '));
+    const match = /🕑 `(\d{4}-\d{2}-\d{2}T[\d:.]+Z)`/.exec(quoted.join('\n'));
+    if (match) stamps.push(Date.parse(match[1]!));
+  });
+
+  return stamps;
 }
 
 test('cuts the window on the depth asked for, and never past the hour', async ({
@@ -210,16 +218,16 @@ test('opens on the window, the domain and the tab it reports', async ({ context,
   const { markdown } = await requestExport(options, tabId, 15);
 
   expect(markdown).toContain(`# Vigie report — ${site.host}`);
-  expect(markdown).toContain(`| Subject | ${site.host}, tab ${tabId} |`);
-  expect(markdown).toContain(`| URL | ${site.origin}/noisy |`);
-  expect(markdown).toContain('| Window | 15 min requested,');
+  expect(markdown).toContain(`tab ${tabId} |`);
+  expect(markdown).toContain(`| **URL** | ${site.origin}/noisy |`);
+  expect(markdown).toContain('min covered of 15 requested');
   // Framing, then what is missing, then the body. A reader has to know the scope before reading a
   // line of it, and know what cannot be seen before concluding from an absence
   // (`spec-export-redesign.md:21`).
-  expect(markdown!.indexOf('| Field | Value |')).toBeLessThan(
-    markdown!.indexOf('## What this report does not contain'),
+  expect(markdown!.indexOf('| **URL** |')).toBeLessThan(
+    markdown!.indexOf('## What this report cannot show'),
   );
-  expect(markdown!.indexOf('## What this report does not contain')).toBeLessThan(
+  expect(markdown!.indexOf('## What this report cannot show')).toBeLessThan(
     markdown!.indexOf('## Timeline'),
   );
 });
@@ -288,8 +296,10 @@ test('writes the unavailability of every response body', async ({ context, exten
   const requests = bundle!.entries.filter((entry) => entry.kind === 'network').length;
   expect(requests).toBeGreaterThan(0);
   // Once per request, never once per report: an absence stated in the header and then omitted
-  // from the entries is an absence a reader stops seeing (`prd.md:79`).
-  expect(markdown!.split('Response body: not available.').length - 1).toBe(requests);
+  // from the entries is an absence a reader stops seeing (`prd.md:79`). It rides the meta line the
+  // request already had rather than a paragraph of its own — stated is the requirement, repeated
+  // as a sentence three hundred times is not.
+  expect(markdown!.split('· no response body').length - 1).toBe(requests);
   expect(markdown).toContain('Response bodies are not included.');
 });
 
@@ -309,12 +319,13 @@ test('marks what went wrong so a reader reaches it without reading the thread', 
   const { markdown } = await requestExport(options, tabId, 15);
 
   const titles = markdown!.split('\n').filter((line) => line.startsWith('### '));
-  const marked = titles.filter((line) => line.startsWith('### [!] '));
+  const marked = titles.filter((line) => line.startsWith('### 🛑 '));
 
   expect(marked.some((title) => title.includes('/the-one-that-broke'))).toBe(true);
-  // The framing table and the timeline are two readings of one judgement. They have to agree, or
-  // the count a reader trusts sends them looking for an entry that carries no marker.
-  expect(markdown).toContain(`| Anomalies | ${marked.length} |`);
+  // The framing and the timeline are two readings of one judgement. They have to agree, or the
+  // count a reader trusts sends them looking for an entry that carries no marker.
+  expect(markdown).toContain(`**${marked.length} anomalies** in `);
+  expect(markdown).toContain('Search `🛑` to reach them.');
   // And not everything is marked: the page's own healthy traffic stays unmarked, without which the
   // marker would single out nothing.
   expect(marked.length).toBeLessThan(titles.length);
@@ -360,7 +371,7 @@ test('announces the depth the capture reaches, not the one asked for', async ({
 
   const { markdown } = await requestExport(options, tabId, 60);
 
-  expect(markdown).toMatch(/\| Window \| 60 min requested, 20(\.\d)? min covered \|/);
+  expect(markdown).toMatch(/20(\.\d)? min covered of 60 requested/);
   expect(markdown).toContain('/twenty-minutes-ago');
 });
 
