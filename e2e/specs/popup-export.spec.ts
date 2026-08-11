@@ -6,6 +6,7 @@ import {
   removeBuildVariant,
 } from '../fixtures/build-variant';
 import { readCapturedEntries, seedCapturedEntry } from '../fixtures/capture-store';
+import { reportFilenamePattern, takeDownload } from '../fixtures/downloaded-report';
 import { expect, test } from '../fixtures/extension';
 import { startTestSite, type TestSite } from '../fixtures/test-site';
 
@@ -14,17 +15,16 @@ import { startTestSite, type TestSite } from '../fixtures/test-site';
  *
  * What the decisions are is asserted without a browser in `popup/state.test.ts`. What only a
  * browser can state is here: that the surface resolves the tab it is about, that the out-of-scope
- * state leads to a settings page that really watches the domain, that a single click puts a report
- * in the clipboard, and that a refused clipboard is shown rather than passed off as a copy.
+ * state leads to a settings page that really watches the domain, that a single click writes the
+ * report to a file, and that a refused write is shown rather than passed off as a saved report.
  *
  * Under Playwright the popup is a tab of the extension's own origin, so the active tab is the popup
  * itself and the subject is resolved by the fallback in `popup/subject-tab.ts:50`. Every test here
  * therefore keeps exactly one web tab open, which is the only arrangement where that fallback has
  * one possible answer.
  *
- * The clipboard is never read back: CDP refuses to grant clipboard permissions to a
- * `chrome-extension://` origin. The displayed acknowledgement is the evidence, and the refusal test
- * is what proves it is not printed unconditionally.
+ * The file is read back, which is new. The clipboard this replaced never could be, so what a click
+ * produced was taken on the popup's word (`fixtures/downloaded-report.ts:6`).
  */
 
 const POPUP_BUILD = buildVariantPath('popup-export');
@@ -161,7 +161,7 @@ test('hands the domain over to the settings, already filled in and one click fro
   await expect(settings.getByTestId('watched-domain-row')).toHaveCount(1);
 });
 
-test('says it is capturing, and reaches the clipboard on one click', async ({
+test('says it is capturing, and writes the report to a file on one click', async ({
   context,
   extensionId,
 }) => {
@@ -172,10 +172,19 @@ test('says it is capturing, and reaches the clipboard on one click', async ({
 
   // Nothing to pick first: the button already says what it exports, and clicking it is the export.
   await expect(popup.getByTestId('export-run')).toContainText('Export 5 min');
-  await popup.getByTestId('export-run').click();
 
-  await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
-  await expect(popup.getByTestId('copy-retry')).toHaveCount(0);
+  const report = await takeDownload(popup, () => popup.getByTestId('export-run').click());
+
+  expect(report.filename).toMatch(reportFilenamePattern(site.host));
+  // The file, not the acknowledgement: what the click produced is the report itself, opening on the
+  // domain it is about and carrying the tab it was cut from.
+  expect(report.text).toContain(`# Vigie report — ${site.host}`);
+  expect(report.text).toContain(`| **URL** | ${site.origin}/noisy |`);
+
+  // The name is repeated on the surface, because a download list holds everything the browser ever
+  // wrote and "it worked" is not enough to find one file in it.
+  await expect(popup.getByTestId('export-status')).toHaveAttribute('data-state', 'downloaded');
+  await expect(popup.getByTestId('export-status-headline')).toContainText(report.filename);
 });
 
 test('says why a depth cannot be picked instead of greying it out in silence', async ({
@@ -207,7 +216,9 @@ test('opens on the depth of the last export rather than asking again', async ({
 
   await first.getByTestId('export-menu').click();
   await first.getByTestId('export-15').click();
-  await expect(first.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+  await expect(first.getByTestId('export-status')).toHaveAttribute('data-state', 'downloaded', {
+    timeout: 15_000,
+  });
 
   // The label follows the export that just happened, without waiting for a reopen.
   await expect(first.getByTestId('export-run')).toContainText('Export 15 min');
@@ -226,7 +237,9 @@ test('falls back to the deepest depth still reachable when the remembered one is
   const deep = await openPopup(context, extensionId);
   await deep.getByTestId('export-menu').click();
   await deep.getByTestId('export-60').click();
-  await expect(deep.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+  await expect(deep.getByTestId('export-status')).toHaveAttribute('data-state', 'downloaded', {
+    timeout: 15_000,
+  });
 
   // The store loses its depth under the popup: the user erases what was captured, then browses a
   // little. Sixty minutes is now a tier nothing can honour, and it was the remembered one.
@@ -266,7 +279,9 @@ test('exports the depth the arrow keys reached, with no pointer anywhere', async
 
   await popup.keyboard.press('Enter');
 
-  await expect(popup.getByTestId('export-status')).toContainText('Copied', { timeout: 15_000 });
+  await expect(popup.getByTestId('export-status')).toHaveAttribute('data-state', 'downloaded', {
+    timeout: 15_000,
+  });
   await expect(popup.getByTestId('export-run')).toContainText('Export 30 min');
 });
 
@@ -293,7 +308,7 @@ test('announces the depth it delivered when the capture is shorter than the one 
   });
 });
 
-test('warns that the window is empty before anything is copied', async ({
+test('warns that the window is empty before anything is exported', async ({
   context,
   extensionId,
 }) => {
@@ -313,29 +328,32 @@ test('warns that the window is empty before anything is copied', async ({
   );
 });
 
-test('shows a refused clipboard rather than letting it pass for a copy', async ({
+test('shows a refused write rather than letting it pass for a saved report', async ({
   context,
   extensionId,
 }) => {
   const { popup } = await capturingPopup(context, extensionId);
 
-  // The refusal a locked-down policy or a lost user activation produces, stated to the page.
+  // The refusal an enterprise policy or a blocked download produces, stated to the page. Patched on
+  // `createObjectURL` because that is the first browser call `downloadReport` makes, so the failure
+  // enters exactly where a real one would (`export/download.ts:44`).
   await popup.evaluate(() => {
-    navigator.clipboard.writeText = () => Promise.reject(new Error('clipboard blocked by policy'));
+    URL.createObjectURL = () => {
+      throw new Error('blob blocked by policy');
+    };
   });
 
   await popup.getByTestId('export-run').click();
 
   const status = popup.getByTestId('export-status');
   await expect(status).toHaveAttribute('data-state', 'failed', { timeout: 15_000 });
-  await expect(popup.getByTestId('export-status-headline')).toContainText('Not copied');
-  await expect(popup.getByTestId('export-status-detail')).toContainText(
-    'clipboard blocked by policy',
-  );
-  // The headline is what a reader takes away, so it must not be readable as a success anywhere.
-  await expect(status).not.toContainText('Copied ');
-  // A retry is a new click and therefore a new transient activation — the thing the write lacked.
-  await expect(popup.getByTestId('copy-retry')).toBeVisible();
+  await expect(popup.getByTestId('export-status-headline')).toContainText('Not saved');
+  await expect(popup.getByTestId('export-status-detail')).toContainText('blob blocked by policy');
+
+  // The one thing a refusal must never do is name a file. A reader who takes a filename away goes
+  // looking for it in their downloads, finds nothing, and blames the folder rather than the export.
+  await expect(status).not.toContainText('vigie-');
+  await expect(status).not.toContainText('Saved ');
 });
 
 test('offers both exits, and the settings one reaches a real surface', async ({

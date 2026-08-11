@@ -7,6 +7,7 @@ import {
 } from '../fixtures/build-variant';
 import { flushCapture, readCapturedEntries, seedCapturedEntry } from '../fixtures/capture-store';
 import { lightnessOf } from '../fixtures/colour';
+import { reportFilenamePattern, takeDownload } from '../fixtures/downloaded-report';
 import { expect, test } from '../fixtures/extension';
 import { startTestSite, type TestSite } from '../fixtures/test-site';
 
@@ -282,14 +283,14 @@ test('removing a domain stops its capture and erases what it held', async ({
 });
 
 /**
- * `spec.md:41` — "choisir une profondeur puis cliquer place le rapport dans le presse-papier ;
- * aucun champ n'est demandé, aucune étape ne s'intercale".
+ * `spec.md:41` — "choisir une profondeur puis cliquer écrit le rapport dans le dossier de
+ * téléchargements ; aucun champ n'est demandé, aucune étape ne s'intercale".
  *
- * The clipboard is never read back: CDP refuses to grant clipboard permissions to a
- * `chrome-extension://` origin. The rendered acknowledgement is the evidence, and
- * `popup-export.spec.ts` is what proves it is not printed unconditionally.
+ * The criterion is checked on the file, not on what the popup says about it. The clipboard this
+ * replaced was unreadable from a spec, so the acknowledgement was the only evidence available and
+ * the thing the product actually delivers went unasserted (`fixtures/downloaded-report.ts:6`).
  */
-test('a depth and a click, and the report is on the clipboard', async ({ context, extensionId }) => {
+test('a depth and a click, and the report is a file on disk', async ({ context, extensionId }) => {
   await capturing(context, extensionId);
   const popup = await openPopup(context, extensionId);
 
@@ -305,7 +306,7 @@ test('a depth and a click, and the report is on the clipboard', async ({ context
   }
   await popup.keyboard.press('Escape');
 
-  // "aucune étape ne s'intercale": one click, and the next thing that happens is the copy. The
+  // "aucune étape ne s'intercale": one click, and the next thing that happens is the file. The
   // depth is on the button before it is pressed, so choosing one is not a step either.
   await expect(popup.getByTestId('export-run')).toContainText('Export 5 min');
 
@@ -313,22 +314,28 @@ test('a depth and a click, and the report is on the clipboard', async ({ context
   const status = popup.getByTestId('export-status');
   await expect(status).toHaveAttribute('data-state', 'idle');
 
-  await popup.getByTestId('export-run').click();
+  const report = await takeDownload(popup, () => popup.getByTestId('export-run').click());
 
-  // The copy leaves no other visible trace — not on the page, not on the button, and the clipboard
-  // cannot be opened to check — so the acknowledgement is the only proof the click worked. It has
-  // to change state, and say so in words as well as in colour (`design.md:28`).
-  await expect(status).toHaveAttribute('data-state', 'copied', { timeout: 15_000 });
-  await expect(popup.getByTestId('export-status-headline')).toContainText('Copied');
+  // No "Save as", no folder to pick, no name to type — the click is the whole gesture, and what
+  // comes out of it is a report under a name that says which site and which moment it covers.
+  expect(report.filename).toMatch(reportFilenamePattern(site.host));
+  expect(report.text).toContain(`# Vigie report — ${site.host}`);
+
+  // A download leaves no other visible trace — not on the page, not on the button — so the
+  // acknowledgement still has to change state and say so in words as well as in colour
+  // (`design.md:28`), and name the file it is a receipt for.
+  await expect(status).toHaveAttribute('data-state', 'downloaded', { timeout: 15_000 });
+  await expect(popup.getByTestId('export-status-headline')).toContainText(report.filename);
 });
 
 /**
  * `spec.md:42` — the report carries the three kinds, ordered and stamped, names the window, the
  * domain and the tab, and states every missing response body instead of omitting it.
  *
- * Read from the worker's answer rather than from the clipboard, for the reason above. What the
- * click puts on the clipboard is this same string: the popup passes `markdown` straight to
- * `copyToClipboard` (`popup/App.tsx:277`).
+ * Read from the worker's answer rather than from a downloaded file, because these assertions need
+ * the bundle beside the text — the ordering of the entries and the count of requests are read off
+ * the object, not off the rendering. The file holds this same string: the popup passes `markdown`
+ * straight to `downloadReport` (`popup/App.tsx:193`), and the test above reads it back off disk.
  */
 test('the report names the window, the domain and the tab, and declares its gaps', async ({
   context,
