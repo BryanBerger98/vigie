@@ -1,5 +1,8 @@
 import type { ConsoleEntry, ErrorEntry, HttpHeader, NetworkEntry } from '@vigie/contract';
 
+import { useI18n } from '@/i18n/I18nProvider';
+import type { MessageKey } from '@/i18n/registry';
+import type { Translator } from '@/i18n/translate';
 import type { StoredEntry } from '@/storage/db';
 
 /**
@@ -13,6 +16,11 @@ import type { StoredEntry } from '@/storage/db';
  * The detail is the report's own content, laid out for a screen rather than for a paste
  * (`export/markdown.ts:194`). Nothing is summarised there: headers come out whole, because the
  * header a reader was looking for is the one a summary would have dropped.
+ *
+ * The correspondence with the report is no longer word for word, since the report stays English
+ * (`prd.md:55`). It is a correspondence of structure: the same fields, in the same order, under
+ * names the glossary pairs up. The glossary is therefore where a reader finds which French term
+ * designates which field of the report.
  *
  * `<details>` rather than a piece of state: the browser already owns open-and-closed, keyboard
  * included, and a surface that must never write has no business keeping a per-entry flag anywhere.
@@ -38,13 +46,18 @@ function oneLine(text: string): string {
   return first;
 }
 
-/** The middle column: how it ended, in as few characters as the kind allows. */
-function label(entry: StoredEntry): string {
+/**
+ * The middle column: how it ended, in as few characters as the kind allows.
+ *
+ * A console level, an error source and a status code go through untranslated. They are what was
+ * observed, and a captured value rendered in the reader's language is a value that was not observed.
+ */
+function label(entry: StoredEntry, t: Translator): string {
   if (entry.kind === 'console') return entry.level;
   if (entry.kind === 'error') return entry.source;
-  if (entry.outcome === 'failed') return 'failed';
-  if (entry.outcome === 'pending') return 'pending';
-  return String(entry.statusCode ?? 'no status');
+  if (entry.outcome === 'failed') return t('entry.label.failed');
+  if (entry.outcome === 'pending') return t('entry.label.pending');
+  return entry.statusCode === undefined ? t('entry.label.no-status') : String(entry.statusCode);
 }
 
 /** The identifying string: the URL, or the first line of what was written. */
@@ -54,14 +67,56 @@ function headline(entry: StoredEntry): string {
   return oneLine(entry.message);
 }
 
-/** The same three sentences the report renders, so a reading here predicts the export. */
-function outcomeText(entry: NetworkEntry): string {
-  const duration = entry.durationMs === undefined ? '' : ` in ${Math.round(entry.durationMs)} ms`;
+/**
+ * The same three sentences the report renders, so a reading here predicts the export.
+ *
+ * The resource type is a `chrome.webRequest.ResourceType` and the transport cause is Chrome's own
+ * `net::ERR_*`: both travel through as they were observed, in their own parentheses.
+ */
+function outcomeText(entry: NetworkEntry, t: Translator): string {
+  const duration =
+    entry.durationMs === undefined
+      ? ''
+      : t('entry.outcome.duration', { ms: Math.round(entry.durationMs) });
   const type = entry.resourceType ? ` (${entry.resourceType})` : '';
 
-  if (entry.outcome === 'failed') return `failed${duration}: ${entry.error ?? '(unknown)'}${type}`;
-  if (entry.outcome === 'pending') return `still open${type}`;
-  return `completed ${entry.statusCode ?? '(no status)'}${duration}${type}`;
+  if (entry.outcome === 'failed') {
+    return t('entry.outcome.failed', {
+      duration,
+      error: entry.error ?? t('entry.outcome.unknown-error'),
+      type,
+    });
+  }
+  if (entry.outcome === 'pending') return t('entry.outcome.pending', { type });
+
+  return t('entry.outcome.completed', {
+    status: entry.statusCode ?? t('entry.outcome.no-status'),
+    duration,
+    type,
+  });
+}
+
+/**
+ * Why this entry carries a response body, or why it does not.
+ *
+ * It used to say `not available — webRequest never exposes one`, on every request, forever. That was
+ * true of the only layer there was; the deep layer reaches bodies, and the sentence has been a lie
+ * on every deep entry since (`contract/events.ts:60`). What replaces it is the entry's own state,
+ * which is also what the report says about it (`export/markdown.ts:114`).
+ *
+ * A captured body of zero bytes is the one state the enum cannot express on its own: neither an
+ * absence nor something to show, and `captured` beside nothing at all reads as a rendering that
+ * dropped it — the same exception the report makes (`export/markdown.ts:379`).
+ */
+function responseBodyKey(entry: NetworkEntry): MessageKey {
+  if (entry.responseBody === 'captured' && entry.responseBodyText === '') return 'entry.body.empty';
+  return `entry.body.${entry.responseBody}`;
+}
+
+/** The body itself, when the capture reached one. An empty one renders no block, as in the report. */
+function responseBodyText(entry: NetworkEntry): string | undefined {
+  const body = entry.responseBodyText;
+  return body === undefined || body.length === 0 ? undefined : body;
 }
 
 function Line({ term, children }: { term: string; children: string }) {
@@ -95,46 +150,70 @@ function Headers({ term, headers }: { term: string; headers: HttpHeader[] | unde
 }
 
 function NetworkDetail({ entry }: { entry: NetworkEntry }) {
+  const { t } = useI18n();
+  const body = responseBodyText(entry);
+
   return (
     <>
-      <Line term="outcome">{outcomeText(entry)}</Line>
-      <Line term="url">{entry.url}</Line>
-      <Headers term="request headers" headers={entry.requestHeaders} />
+      <Line term={t('entry.term.outcome')}>{outcomeText(entry, t)}</Line>
+      <Line term={t('entry.term.url')}>{entry.url}</Line>
+      <Headers term={t('entry.term.request-headers')} headers={entry.requestHeaders} />
       {entry.requestBody === undefined ? null : (
-        <Block term="request body" text={entry.requestBody} />
+        <Block term={t('entry.term.request-body')} text={entry.requestBody} />
       )}
-      <Headers term="response headers" headers={entry.responseHeaders} />
+      <Headers term={t('entry.term.response-headers')} headers={entry.responseHeaders} />
       {/*
         Stated on every single request, exactly as the report states it: this is the absence a
-        reader is most likely to mistake for an empty response (`export/markdown.ts:203`).
+        reader is most likely to mistake for an empty response (`export/markdown.ts:348`). The body
+        replaces the state line when there is one to show, so the column holds one fact per row.
       */}
-      <Line term="response body">not available — webRequest never exposes one</Line>
+      {body === undefined ? (
+        <Line term={t('entry.term.response-body')}>{t(responseBodyKey(entry))}</Line>
+      ) : (
+        <Block term={t('entry.term.response-body')} text={body} />
+      )}
+      {entry.responseBody === 'truncated' ? (
+        <Line term={t('entry.term.note')}>{t('entry.body.truncated')}</Line>
+      ) : null}
     </>
   );
 }
 
 function ConsoleDetail({ entry }: { entry: ConsoleEntry }) {
+  const { t } = useI18n();
+
   return (
     <>
-      <Line term="level">{entry.level}</Line>
-      <Block term="text" text={entry.text} />
-      {entry.truncated ? <Line term="note">text truncated by the capture</Line> : null}
+      <Line term={t('entry.term.level')}>{entry.level}</Line>
+      <Block term={t('entry.term.text')} text={entry.text} />
+      {entry.truncated ? (
+        <Line term={t('entry.term.note')}>{t('entry.note.text-truncated')}</Line>
+      ) : null}
     </>
   );
 }
 
 function ErrorDetail({ entry }: { entry: ErrorEntry }) {
+  const { t } = useI18n();
+
   return (
     <>
-      <Line term="source">{entry.source}</Line>
-      <Block term="message" text={entry.message} />
-      {entry.stack ? <Block term="stack" text={entry.stack} /> : null}
-      {entry.truncated ? <Line term="note">truncated by the capture</Line> : null}
+      <Line term={t('entry.term.source')}>{entry.source}</Line>
+      <Block term={t('entry.term.message')} text={entry.message} />
+      {entry.stack ? <Block term={t('entry.term.stack')} text={entry.stack} /> : null}
+      {entry.truncated ? (
+        <Line term={t('entry.term.note')}>{t('entry.note.truncated')}</Line>
+      ) : null}
     </>
   );
 }
 
 export function EntryRow({ entry }: { entry: StoredEntry }) {
+  const { t } = useI18n();
+  // The badge marks an absence, so it is drawn only on an entry that really has nothing to show.
+  // It used to sit on every network row, which made it say "network" rather than "no body".
+  const missingBody = entry.kind === 'network' && responseBodyText(entry) === undefined;
+
   return (
     <li
       data-testid="entry-row"
@@ -158,15 +237,15 @@ export function EntryRow({ entry }: { entry: StoredEntry }) {
             <span aria-hidden="true" className="text-muted-foreground">
               {MARK[entry.kind]}
             </span>
-            <span className="font-mono text-muted-foreground">{label(entry)}</span>
+            <span className="font-mono text-muted-foreground">{label(entry, t)}</span>
             <span className="min-w-0 flex-1 truncate">{headline(entry)}</span>
-            {entry.kind === 'network' ? (
+            {missingBody ? (
               <span
                 data-testid="entry-no-body"
-                title="Response bodies are never captured."
+                title={t(responseBodyKey(entry as NetworkEntry))}
                 className="shrink-0 rounded-sm border px-1 text-[10px] text-muted-foreground"
               >
-                no body
+                {t('entry.no-body')}
               </span>
             ) : null}
           </span>

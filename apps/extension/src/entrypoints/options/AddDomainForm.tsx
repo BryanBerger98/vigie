@@ -1,5 +1,8 @@
 import type { SubmitEvent } from 'react';
 
+import { useI18n } from '@/i18n/I18nProvider';
+import type { MessageKey } from '@/i18n/registry';
+import type { MessageParams } from '@/i18n/translate';
 import { watchDomain } from '@/storage/watched-domains';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
@@ -16,6 +19,17 @@ interface AddDomainFormProps {
 }
 
 /**
+ * Which of the three outcomes was reported, kept as a key rather than as a sentence.
+ *
+ * A resolved sentence would freeze the language it was resolved in: switching language with an
+ * error on screen would repaint the whole page around a message left in the previous one.
+ */
+interface FormError {
+  key: MessageKey;
+  params: MessageParams;
+}
+
+/**
  * Adds a domain to the watched list.
  *
  * The sequence — validate, ask the browser, store only if it said yes — belongs to `watchDomain`,
@@ -23,8 +37,9 @@ interface AddDomainFormProps {
  * do: keep the call inside the gesture, and say out loud which of the three outcomes happened.
  */
 export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProps) {
+  const { t } = useI18n();
   const [value, setValue] = useState(initialDomain);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<FormError | null>(null);
   const [pending, setPending] = useState(false);
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
@@ -37,11 +52,11 @@ export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProp
     watchDomain(value)
       .then((outcome) => {
         if (outcome.status === 'invalid') {
-          setError(`"${value.trim()}" is not a domain. Try example.com, or paste a URL.`);
+          setError({ key: 'domains.add.invalid', params: { value: value.trim() } });
           return;
         }
         if (outcome.status === 'refused') {
-          setError(`Chrome did not grant access to ${outcome.domain}, so it was not added.`);
+          setError({ key: 'domains.add.refused', params: { domain: outcome.domain } });
           return;
         }
         setValue('');
@@ -49,7 +64,7 @@ export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProp
       })
       .catch((cause: unknown) => {
         console.error('[vigie] could not add %s', value, cause);
-        setError(`Something went wrong while adding "${value.trim()}".`);
+        setError({ key: 'domains.add.failed', params: { value: value.trim() } });
       })
       .finally(() => setPending(false));
   };
@@ -59,7 +74,7 @@ export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProp
       <div className="flex items-start gap-2">
         <Input
           data-testid="add-domain-input"
-          aria-label="Domain to watch"
+          aria-label={t('domains.add.label')}
           aria-invalid={error !== null}
           aria-describedby={error ? 'add-domain-error' : undefined}
           placeholder="example.com"
@@ -70,13 +85,13 @@ export function AddDomainForm({ onAdded, initialDomain = '' }: AddDomainFormProp
           disabled={pending}
         />
         <Button data-testid="add-domain-submit" type="submit" disabled={pending || !value.trim()}>
-          Add
+          {t('domains.add.submit')}
         </Button>
       </div>
 
       {error ? (
         <p id="add-domain-error" data-testid="add-domain-error" role="alert" className="text-sm text-destructive">
-          {error}
+          {t(error.key, error.params)}
         </p>
       ) : null}
     </form>

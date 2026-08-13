@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Vigie",
+    "description": "The extension name, shown in the browser's extension list and on the store listing. A product name is not translated, so every locale repeats it verbatim."
+  },
+  "extDescription": {
+    "message": "Capte le trafic réseau, la sortie console et les erreurs JS sur les domaines que vous désignez, et vous rend un rapport Markdown.",
+    "description": "The one-line description Chrome shows under the name. Chrome caps it at 132 characters and silently rejects longer ones at submission, so a translation shortens rather than expands."
+  }
+}

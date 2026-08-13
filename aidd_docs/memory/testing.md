@@ -13,6 +13,7 @@ How the project is tested: the layers, the tools, and the conventions. Where tes
 ## Tools
 
 - Vitest — units, across every workspace.
+- jsdom — opted into per file with `// @vitest-environment jsdom`, never globally. Only React state that has to be observed across a re-render needs it; every other unit runs in Node, which is faster and cannot be fooled by a DOM that is not Chrome's.
 - Playwright — e2e, launching Chrome with the unpacked build loaded (`--load-extension`).
 
 ## Conventions

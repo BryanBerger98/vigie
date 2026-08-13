@@ -1,5 +1,6 @@
 import { EyeOff, Minus, Radio, TriangleAlert, type LucideIcon } from 'lucide-react';
 
+import { useI18n } from '@/i18n/I18nProvider';
 import { Button } from '@/ui/components/button';
 
 import type { ScopeStatusView } from './state';
@@ -53,6 +54,7 @@ const TONE: Record<ScopeStatusView['kind'], string> = {
 };
 
 export function ScopeStatus({ status, onWatch }: ScopeStatusProps) {
+  const { t } = useI18n();
   const Icon = ICON[status.kind];
 
   return (
@@ -79,7 +81,7 @@ export function ScopeStatus({ status, onWatch }: ScopeStatusProps) {
           className="self-start"
           onClick={() => onWatch(status.offerDomain as string)}
         >
-          {`Watch ${status.offerDomain}`}
+          {t('scope.out.watch', { domain: status.offerDomain })}
         </Button>
       ) : null}
     </section>

@@ -8,11 +8,11 @@
 
 | Champ | Valeur |
 | --- | --- |
-| Nom | `Vigie` |
+| Nom | `Vigie` — identique dans les deux langues, un nom de produit ne se traduit pas |
 | Version | `0.1.0` — lue depuis `apps/extension/package.json:3` par WXT |
 | Paquet | `apps/extension/.output/vigieextension-0.1.0-chrome.zip`, 223 ko, produit par `pnpm turbo zip` |
 | Catégorie | Developer Tools |
-| Langue de la fiche | English |
+| Langues de la fiche | English (par défaut) et Français |
 | Visibilité | **Non répertoriée** — voir ci-dessous |
 
 ⚠️ **Le produit est en test, pas en sortie.** La version le dit — `0.1.0`, et rien ne passera à `1.0`
@@ -21,7 +21,7 @@ faites. Une fiche publique invite des utilisateurs qui n'ont pas signé pour de 
 extension qui capte des jetons de session en clair (`spec.md:34`). La visibilité de la première
 soumission est donc **non répertoriée** : l'extension s'installe par lien, par les seules personnes
 à qui on l'a donné. Le passage en public est une décision distincte, prise après la recette.
-| Politique de confidentialité | `docs/privacy-policy.md`, à publier sur GitHub Pages ⏳ |
+| Politique de confidentialité | `docs/privacy-policy.md` et `docs/politique-de-confidentialite.md`, à publier sur GitHub Pages ⏳ |
 | Compte développeur | frais unique de 5 USD, non réglé ⏳ (`deployment.md:31`) |
 
 Le paquet a été chargé sur un profil Chrome neuf : le service worker démarre, les quatre surfaces
@@ -41,6 +41,38 @@ and JavaScript errors — on the domains you explicitly designate, and hands it 
 report you can paste into a ticket or into an AI assistant. It exists so that a bug already observed
 can be reported without being reproduced first.
 ```
+
+## La fiche en deux langues
+
+Le nom et la description courte ne se saisissent pas dans le formulaire : ils sont lus dans le
+paquet, depuis `apps/extension/public/_locales/`. Chrome les résout au chargement contre la langue
+du navigateur, et retombe sur l'anglais pour toute langue absente — `default_locale: 'en'`.
+
+| Champ | English | Français |
+| --- | --- | --- |
+| Nom | `Vigie` | `Vigie` |
+| Description courte | `Captures network traffic, console output and JS errors on the domains you designate, and hands you a Markdown report.` | `Capte le trafic réseau, la sortie console et les erreurs JS sur les domaines que vous désignez, et vous rend un rapport Markdown.` |
+| Longueur | 117 caractères | 129 caractères |
+
+⚠️ **Le plafond est 132 caractères et il a déjà été franchi une fois.** La description anglaise en
+mesurait 135 avant cette phase. Toute reformulation se remesure, dans les deux langues, avant
+d'être committée.
+
+Le reste de la fiche — description longue, captures d'écran, icône — se saisit dans la console
+développeur, langue par langue. Trois règles s'appliquent :
+
+- **Un seul jeu de captures**, partagé par les deux fiches. Le produit est le même, les captures
+  aussi ; la ligne 3 du tableau final ne se dédouble pas.
+- **Les mêmes permissions décrites de la même façon.** Une divergence entre les deux fiches est un
+  motif de rejet au même titre qu'une divergence entre la fiche et la politique (`prd.md:117`).
+- **La fiche française est une saisie humaine**, non couverte par le dépôt. Elle reste due au même
+  titre que la publication de la politique (`prd.md:130`).
+
+⚡ **Une conséquence à connaître avant qu'elle ne soit rapportée comme un bug** : le nom et la
+description affichés dans `chrome://extensions` suivent la langue du navigateur, pas la préférence
+Vigie. Un navigateur anglais avec Vigie réglé en français montre une interface française et une
+description anglaise. `chrome.i18n` résout au chargement et n'accepte aucune surcharge ; rien de
+notre côté n'y change quoi que ce soit.
 
 ## Justification des permissions
 
@@ -119,11 +151,13 @@ construction :
 
 | # | Reste à faire | Qui |
 | --- | --- | --- |
-| 1 | Publier `docs/privacy-policy.md` sur GitHub Pages et vérifier l'URL publique | humain |
+| 1 | Publier les deux politiques sur GitHub Pages et vérifier les deux URL publiques | humain |
 | 2 | Créer le compte développeur et régler les 5 USD | humain |
-| 3 | Rédiger la fiche : captures d'écran, icône de la boutique, description longue | humain |
-| 4 | Terminer la recette manuelle — `acceptance-report.md`, critères ⏳ | humain |
-| 5 | **Accord explicite avant soumission** | humain |
+| 3 | Rédiger la fiche anglaise : captures d'écran, icône de la boutique, description longue | humain |
+| 4 | Saisir la fiche française dans la console développeur, mêmes captures, mêmes permissions | humain |
+| 5 | Faire relire le consentement français par un humain — un consentement ne s'auto-valide pas | humain |
+| 6 | Terminer la recette manuelle — `acceptance-report.md`, critères ⏳ | humain |
+| 7 | **Accord explicite avant soumission** | humain |
 
 🔒 **La soumission n'est pas réversible en pratique.** Le Chrome Web Store n'offre pas de retour
 arrière immédiat, et une correction repasse par un examen de plusieurs jours (`deployment.md:38`).

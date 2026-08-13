@@ -1,3 +1,4 @@
+import { useI18n } from '@/i18n/I18nProvider';
 import { removeWatchedDomain, type WatchedDomain } from '@/storage/watched-domains';
 import { Button } from '@/ui/components/button';
 
@@ -13,10 +14,12 @@ interface WatchedDomainListProps {
  * up here as missing, which is the only way the user can tell why a capture came back empty.
  */
 export function WatchedDomainList({ domains, onRemoved }: WatchedDomainListProps) {
+  const { t } = useI18n();
+
   if (domains.length === 0) {
     return (
       <p data-testid="watched-domains-empty" className="text-sm text-muted-foreground">
-        No domain is watched yet. Nothing is being captured.
+        {t('domains.empty')}
       </p>
     );
   }
@@ -39,6 +42,7 @@ export function WatchedDomainList({ domains, onRemoved }: WatchedDomainListProps
  * asserted the way the rest of this screen is.
  */
 function WatchedDomainRow({ entry, onRemoved }: { entry: WatchedDomain; onRemoved: () => void }) {
+  const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -71,14 +75,14 @@ function WatchedDomainRow({ entry, onRemoved }: { entry: WatchedDomain; onRemove
           data-granted={entry.granted}
           className="text-xs text-muted-foreground"
         >
-          {entry.granted ? 'Access granted' : 'Access missing — grant it again to capture'}
+          {entry.granted ? t('domains.access.granted') : t('domains.access.missing')}
         </span>
 
         <Button
           data-testid="watched-domain-remove"
           variant="ghost"
           size="icon"
-          aria-label={`Remove ${entry.domain}`}
+          aria-label={t('domains.remove', { domain: entry.domain })}
           onClick={() => setConfirming(true)}
           disabled={confirming || pending}
         >
@@ -89,8 +93,7 @@ function WatchedDomainRow({ entry, onRemoved }: { entry: WatchedDomain; onRemove
       {confirming ? (
         <div className="flex flex-col gap-2 rounded-md bg-muted p-2">
           <p data-testid="remove-warning" role="alert" className="text-xs">
-            Removing {entry.domain} revokes its access and erases everything captured for it. This
-            cannot be undone.
+            {t('domains.remove.warning', { domain: entry.domain })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -100,7 +103,7 @@ function WatchedDomainRow({ entry, onRemoved }: { entry: WatchedDomain; onRemove
               onClick={() => void remove()}
               disabled={pending}
             >
-              Remove and erase
+              {t('domains.remove.confirm')}
             </Button>
             <Button
               data-testid="remove-cancel"
@@ -109,7 +112,7 @@ function WatchedDomainRow({ entry, onRemoved }: { entry: WatchedDomain; onRemove
               onClick={() => setConfirming(false)}
               disabled={pending}
             >
-              Cancel
+              {t('domains.remove.cancel')}
             </Button>
           </div>
         </div>

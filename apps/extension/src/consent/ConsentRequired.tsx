@@ -1,3 +1,4 @@
+import { useI18n } from '@/i18n/I18nProvider';
 import { Button } from '@/ui/components/button';
 
 import { openConsentScreen } from './state';
@@ -15,6 +16,7 @@ import type { ConsentState } from './state';
  * user (`consent/state.ts:18`).
  */
 export function ConsentRequired({ state }: { state: ConsentState }) {
+  const { t } = useI18n();
   const stale = state.status === 'stale';
 
   return (
@@ -24,15 +26,13 @@ export function ConsentRequired({ state }: { state: ConsentState }) {
       className="flex flex-col items-start gap-3 rounded-md border p-4"
     >
       <p className="text-sm font-medium">
-        {stale ? 'What Vigie captures has changed' : 'Vigie has not started capturing'}
+        {t(stale ? 'consent.gate.stale.title' : 'consent.gate.title')}
       </p>
       <p className="text-sm text-muted-foreground">
-        {stale
-          ? 'Nothing is being captured until you have read the updated disclosure and agreed to it.'
-          : 'Nothing is captured until you have read what Vigie records and agreed to it.'}
+        {t(stale ? 'consent.gate.stale.body' : 'consent.gate.body')}
       </p>
       <Button data-testid="open-consent" size="sm" onClick={() => void openConsentScreen()}>
-        Read what Vigie records
+        {t('consent.gate.open')}
       </Button>
     </section>
   );

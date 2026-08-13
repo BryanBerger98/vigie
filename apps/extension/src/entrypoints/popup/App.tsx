@@ -25,6 +25,7 @@ import {
 import { downloadReport } from '@/export/download';
 import { reportFilename } from '@/export/filename';
 import { countForTab, oldestCaptureAt } from '@/export/slice';
+import { useI18n } from '@/i18n/I18nProvider';
 import { RETENTION_MS, readStorageState } from '@/storage/prune';
 import { watchedDomainFor } from '@/storage/scope';
 import { hasHostAccess, onWatchedDomainsChanged, readWatchedDomains } from '@/storage/watched-domains';
@@ -41,12 +42,12 @@ import { TabContextLine } from './TabContextLine';
 import { readLastDepth, writeLastDepth } from './last-depth';
 import { resolveSubjectTab } from './subject-tab';
 import {
-  IDLE_FEEDBACK,
   MS_PER_MINUTE,
   deepLayerView,
   depthAvailability,
   downloadAcknowledgement,
   exportFailure,
+  idleFeedback,
   interruptionNotice,
   isDeepLayerFailure,
   resolveCurrentDepth,
@@ -76,16 +77,36 @@ import {
  *
  * The `data-testid` attributes are the handles the end-to-end suite reads; `popup-root` proves the
  * popup mounted and predates this phase.
+ *
+ * Nothing this component holds in state is a sentence. A choice made in the settings has to reach a
+ * popup that is already open (`prd.md:102`), and a sentence built once and stored would still be in
+ * the language it was built in when it does. What is stored is what happened; the words are built
+ * at render, from the translator the provider hands down.
  */
 
+/** A refused start or stop: what was asked, and what the browser answered. */
+interface DeepLayerFailure {
+  intent: 'start' | 'stop';
+  reason: string;
+}
+
 export default function App() {
+  const { t } = useI18n();
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [facts, setFacts] = useState<PopupFacts | null>(null);
   const [rememberedDepth, setRememberedDepth] = useState<ExportDepthMinutes | null>(null);
-  const [feedback, setFeedback] = useState<ExportFeedbackView>(IDLE_FEEDBACK);
+  /**
+   * `null` is the idle state, rather than the idle sentence held in state.
+   *
+   * A sentence stored here would be the one language it was built in, and a popup left open while
+   * the settings switch language would keep announcing the old one. What is worth remembering is
+   * that nothing has been exported yet; the words for it are built at render, like every other.
+   */
+  const [feedback, setFeedback] = useState<ExportFeedbackView | null>(null);
   const [busy, setBusy] = useState(false);
   const [cdpSession, setCdpSession] = useState<CdpSessionState>(EMPTY_CDP_SESSION_STATE);
-  const [deepLayerFailure, setDeepLayerFailure] = useState<string | null>(null);
+  // The intent and the browser's reason, not the sentence built from them, for the reason above.
+  const [deepLayerFailure, setDeepLayerFailure] = useState<DeepLayerFailure | null>(null);
   const [interrupted, setInterrupted] = useState(false);
   const noticeTaken = useRef(false);
 
@@ -229,9 +250,9 @@ export default function App() {
     void browser.runtime.sendMessage(message).then(
       (answer: unknown) => {
         const reason = isDeepLayerFailure(answer) ? answer.error : null;
-        if (reason !== null) setDeepLayerFailure(`Could not ${intent} it: ${reason}`);
+        if (reason !== null) setDeepLayerFailure({ intent, reason });
       },
-      (error: unknown) => setDeepLayerFailure(`Could not ${intent} it: ${String(error)}`),
+      (error: unknown) => setDeepLayerFailure({ intent, reason: String(error) }),
     );
   }
 
@@ -246,26 +267,26 @@ export default function App() {
   async function exportReport(depthMinutes: ExportDepthMinutes): Promise<void> {
     const subject = facts?.subject;
     if (!subject) {
-      setFeedback(exportFailure('This window has no web page to report on.'));
+      setFeedback(exportFailure(t('export.no-subject'), t));
       return;
     }
 
     setBusy(true);
-    setFeedback(workingFeedback(depthMinutes));
+    setFeedback(workingFeedback(depthMinutes, t));
 
     const answer: unknown = await browser.runtime
       .sendMessage(exportRequest(subject.tabId, depthMinutes))
       .catch((error: unknown) => ({ error: String(error) }));
 
     if (isExportFailure(answer)) {
-      setFeedback(exportFailure(answer.error));
+      setFeedback(exportFailure(answer.error, t));
       setBusy(false);
       return;
     }
 
     const { bundle, markdown } = answer as ExportResult;
     const filename = reportFilename(bundle);
-    setFeedback(downloadAcknowledgement(bundle, filename, downloadReport(markdown, filename)));
+    setFeedback(downloadAcknowledgement(bundle, filename, downloadReport(markdown, filename), t));
     setBusy(false);
 
     // Not awaited: the label follows the click rather than the next open, and a preference that has
@@ -274,17 +295,20 @@ export default function App() {
     void writeLastDepth(depthMinutes);
   }
 
-  const status = facts ? scopeStatus(facts) : null;
+  const status = facts ? scopeStatus(facts, t) : null;
   // Read at render time, not in an effect: the browser verdict is a property of the browser and
   // never moves, and the click below cannot await anything before asking for the permission.
-  const deepLayer = deepLayerView({
-    support: currentDeepLayerSupport(),
-    armed: cdpSession.armed,
-    canceledByUser: cdpSession.canceledByUser,
-    attachedTabs: cdpSession.attachedTabs.length,
-  });
-  const notice = interruptionNotice(interrupted);
-  const availability = depthAvailability(facts?.coveredMinutes ?? 0);
+  const deepLayer = deepLayerView(
+    {
+      support: currentDeepLayerSupport(),
+      armed: cdpSession.armed,
+      canceledByUser: cdpSession.canceledByUser,
+      attachedTabs: cdpSession.attachedTabs.length,
+    },
+    t,
+  );
+  const notice = interruptionNotice(interrupted, t);
+  const availability = depthAvailability(facts?.coveredMinutes ?? 0, t);
   const currentDepth = resolveCurrentDepth(rememberedDepth, availability);
   // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
   // button there would export a window that was never captured (`phase-8.md:112`).
@@ -325,14 +349,24 @@ export default function App() {
         <ScopeStatus status={status} onWatch={watchDomainFromPopup} />
       ) : (
         <p data-testid="scope-loading" className="text-xs text-muted-foreground">
-          Reading the scope of this tab…
+          {t('scope.loading')}
         </p>
       )}
 
       {/* Below the scope and above the export, because it is read in that order: what is being
           captured, then how deeply, then what comes out. It does not depend on the subject tab —
           the layer follows the watched perimeter, not the tab this popup happens to be over. */}
-      <DeepLayerControl view={deepLayer} failure={deepLayerFailure} onAct={actOnDeepLayer} />
+      <DeepLayerControl
+        view={deepLayer}
+        failure={
+          deepLayerFailure
+            ? t(deepLayerFailure.intent === 'stop' ? 'deep.stop.failed' : 'deep.start.failed', {
+                reason: deepLayerFailure.reason,
+              })
+            : null
+        }
+        onAct={actOnDeepLayer}
+      />
 
       {exportable && facts ? (
         <>
@@ -342,8 +376,8 @@ export default function App() {
             busy={busy}
             onExport={(depth) => void exportReport(depth)}
           />
-          <TabContextLine text={tabContextLine(facts)} />
-          <ExportFeedback feedback={feedback} />
+          <TabContextLine text={tabContextLine(facts, t)} />
+          <ExportFeedback feedback={feedback ?? idleFeedback(t)} />
         </>
       ) : null}
 
@@ -364,7 +398,7 @@ export default function App() {
           }}
         >
           <PanelRight aria-hidden="true" className="size-4" />
-          Inspect live
+          {t('popup.sidepanel')}
         </Button>
       ) : null}
     </main>

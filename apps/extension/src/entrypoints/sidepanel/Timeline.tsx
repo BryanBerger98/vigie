@@ -1,3 +1,4 @@
+import { useI18n } from '@/i18n/I18nProvider';
 import type { TabWindow } from '@/storage/live-query';
 import { Button } from '@/ui/components/button';
 
@@ -38,6 +39,7 @@ interface TimelineProps {
 }
 
 export function Timeline({ thread, shrunk }: TimelineProps) {
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(RENDER_WINDOW);
   const scroller = useRef<HTMLDivElement | null>(null);
   const following = useRef(true);
@@ -56,7 +58,7 @@ export function Timeline({ thread, shrunk }: TimelineProps) {
   if (thread.entries.length === 0) {
     return (
       <p data-testid="timeline-empty" className="text-xs text-muted-foreground">
-        Nothing captured on this tab in the last hour. What happens next appears here on its own.
+        {t('thread.empty')}
       </p>
     );
   }
@@ -81,7 +83,7 @@ export function Timeline({ thread, shrunk }: TimelineProps) {
           className="self-start"
           onClick={() => setMounted((count) => count + RENDER_WINDOW)}
         >
-          {`Show older — ${hidden} more held in this window`}
+          {t.plural(hidden, 'thread.older.one', 'thread.older.other', { count: hidden })}
         </Button>
       ) : null}
 

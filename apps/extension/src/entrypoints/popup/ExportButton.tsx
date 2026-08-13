@@ -1,6 +1,7 @@
 import type { ExportDepthMinutes } from '@vigie/contract';
 import { ChevronDown } from 'lucide-react';
 
+import { useI18n } from '@/i18n/I18nProvider';
 import { Button, buttonVariants } from '@/ui/components/button';
 import {
   DropdownMenu,
@@ -42,9 +43,13 @@ export function ExportButton({
   busy,
   onExport,
 }: ExportButtonProps) {
+  const { t } = useI18n();
+
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold">Export the last</h2>
+      {/* The heading and the button read as one sentence in English and as two labels in French,
+          which is why each is a key of its own rather than a fragment glued to a number. */}
+      <h2 className="text-xs font-semibold">{t('export.title')}</h2>
 
       <div className="flex">
         <Button
@@ -55,13 +60,13 @@ export function ExportButton({
           disabled={busy}
           onClick={() => onExport(currentDepth)}
         >
-          {`Export ${currentDepth} min`}
+          {t('export.run', { minutes: currentDepth })}
         </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger
             data-testid="export-menu"
-            aria-label="Choose another depth"
+            aria-label={t('export.menu')}
             disabled={busy}
             className={cn(
               buttonVariants({ variant: 'outline', size: 'sm' }),
@@ -84,7 +89,7 @@ export function ExportButton({
                 disabled={!depth.enabled}
                 onSelect={() => onExport(depth.depthMinutes)}
               >
-                <span>{`${depth.depthMinutes} min`}</span>
+                <span>{t('export.depth', { minutes: depth.depthMinutes })}</span>
                 {depth.reason ? (
                   <span className="text-xs text-muted-foreground">{depth.reason}</span>
                 ) : null}

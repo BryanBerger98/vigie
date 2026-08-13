@@ -1,5 +1,7 @@
 import { MS_PER_MINUTE, minutes } from '@/entrypoints/popup/state';
+import { useI18n } from '@/i18n/I18nProvider';
 import type { TabWindow } from '@/storage/live-query';
+import { RETENTION_MS } from '@/storage/prune';
 
 /**
  * The low edge of the thread, said out loud.
@@ -21,6 +23,7 @@ interface WindowEdgeProps {
 }
 
 export function WindowEdge({ thread, shrunk }: WindowEdgeProps) {
+  const { t } = useI18n();
   const oldest = thread.entries[0]?.timestamp;
   const held = oldest === undefined ? 0 : Math.max(0, thread.readAt - oldest) / MS_PER_MINUTE;
 
@@ -34,13 +37,18 @@ export function WindowEdge({ thread, shrunk }: WindowEdgeProps) {
         <span aria-hidden="true" className="mr-1.5 font-normal">
           ┌
         </span>
-        {shrunk ? 'Start of the window — shortened' : 'Start of the window — one hour'}
+        {shrunk ? t('thread.edge.shortened') : t('thread.edge.kept')}
       </p>
 
       <p data-testid="window-edge-detail">
         {shrunk
-          ? `Storage pressure pushed the oldest entries out early: this thread reaches back ${minutes(Number(held.toFixed(1)))} min instead of 60. What came before it was purged.`
-          : 'Vigie holds one hour. Anything this tab did before this point has been purged — a deletion, not a gap in the capture.'}
+          ? t('thread.edge.shortened.detail', {
+              minutes: minutes(Number(held.toFixed(1))),
+              // The promise the shortened window fell short of, taken from the promise itself
+              // rather than written as 60 in a sentence that would then have to be re-translated.
+              floor: RETENTION_MS / MS_PER_MINUTE,
+            })
+          : t('thread.edge.kept.detail')}
       </p>
     </section>
   );

@@ -30,7 +30,7 @@ flowchart LR
 - **Local** — the WXT dev build, loaded unpacked. The only development environment; there is no staging.
 - **Chrome Web Store** — the published extension. Requires a developer account (one-off USD 5 fee).
 - **npm** — `@vigie/sdk`, public.
-- **GitHub Pages** — `docs/privacy-policy.md`. Must be publicly reachable *before* a Chrome Web Store submission is accepted, so it ships first.
+- **GitHub Pages** — `docs/privacy-policy.md` and `docs/politique-de-confidentialite.md`. Both must be publicly reachable _before_ a Chrome Web Store submission is accepted, so they ship first. Two files because the consent screen links to the policy in the language it is being read in, and a French disclosure pointing at an English policy is the divergence the store rejects for. Neither is published yet: both `https://bryanberger98.github.io/vigie/privacy-policy.html` and `.../politique-de-confidentialite.html` answer 404, measured 2026-08-13. The site itself has never been turned on — this is not a regression the French page introduced.
 
 ## Release
 

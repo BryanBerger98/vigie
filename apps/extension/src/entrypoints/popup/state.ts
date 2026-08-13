@@ -1,13 +1,15 @@
 import {
   EXPORT_DEPTHS_MINUTES,
-  GAP_SUMMARIES,
   type ExportDepthMinutes,
+  type GapKind,
   type ReportBundle,
 } from '@vigie/contract';
 
 import type { DeepLayerSupport } from '@/capture/cdp/support';
 import { KEEPALIVE_CHROME_VERSION } from '@/capture/cdp/support';
 import type { DownloadOutcome } from '@/export/download';
+import type { MessageKey } from '@/i18n/registry';
+import type { MessageParams, Translator } from '@/i18n/translate';
 import { RETENTION_MS } from '@/storage/prune';
 
 /**
@@ -18,9 +20,12 @@ import { RETENTION_MS } from '@/storage/prune';
  * told they just took away. Kept pure so those three answers are asserted without a browser, and so
  * the components stay renderers rather than places where a rule hides.
  *
- * Every sentence this module returns is user-facing text. It lives beside the rule that produces
- * it on purpose: a state whose wording is written elsewhere is a state that can be rendered while
- * saying nothing about itself, which is the exact failure `design.md:21` warns about.
+ * Every function that returns a sentence takes the translator as its last argument, and keeps
+ * returning finished sentences rather than keys. The rule and the sentence still live together —
+ * the rule now picks the key, and the catalog holds the words — which is what keeps a state from
+ * being rendered while saying nothing about itself (`design.md:21`). Handing keys to the components
+ * instead would move that choice into four renderers and rewrite every assertion in this module's
+ * tests, for exactly the same pixels.
  */
 
 export const MS_PER_MINUTE = 60_000;
@@ -80,14 +85,14 @@ export interface ScopeStatusView {
  * outright, while a shrunk window is still capturing but over less than the hour promised. Telling
  * a user "degraded" without saying which leaves them unable to act on either.
  */
-export function scopeStatus(facts: PopupFacts): ScopeStatusView {
+export function scopeStatus(facts: PopupFacts, t: Translator): ScopeStatusView {
   const { subject, watchedDomain } = facts;
 
   if (!subject) {
     return {
       kind: 'no-subject',
-      label: 'No page to report on',
-      detail: 'This window has no web page open, so there is nothing being captured to export.',
+      label: t('scope.none.label'),
+      detail: t('scope.none.detail'),
       offerDomain: null,
     };
   }
@@ -95,8 +100,8 @@ export function scopeStatus(facts: PopupFacts): ScopeStatusView {
   if (!watchedDomain) {
     return {
       kind: 'out-of-scope',
-      label: 'Out of scope',
-      detail: `${subject.host} is not watched. Nothing on this tab is being captured, and nothing from before it is watched can ever be exported.`,
+      label: t('scope.out.label'),
+      detail: t('scope.out.detail', { host: subject.host }),
       offerDomain: subject.host,
     };
   }
@@ -104,8 +109,8 @@ export function scopeStatus(facts: PopupFacts): ScopeStatusView {
   if (!facts.hostAccess) {
     return {
       kind: 'degraded',
-      label: 'Degraded — host access revoked',
-      detail: `${watchedDomain} is still on the watched list, but Chrome no longer grants access to it, so nothing is being captured. Grant it again from the settings.`,
+      label: t('scope.revoked.label'),
+      detail: t('scope.revoked.detail', { domain: watchedDomain }),
       offerDomain: null,
     };
   }
@@ -113,16 +118,24 @@ export function scopeStatus(facts: PopupFacts): ScopeStatusView {
   if (isShrunk(facts)) {
     return {
       kind: 'degraded',
-      label: 'Degraded — window shortened',
-      detail: `${watchedDomain} is being captured, but storage pressure pushed the oldest entries out: ${minutes(facts.coveredMinutes)} min are held instead of 60.`,
+      label: t('scope.shrunk.label'),
+      detail: t('scope.shrunk.detail', {
+        domain: watchedDomain,
+        minutes: minutes(facts.coveredMinutes),
+      }),
       offerDomain: null,
     };
   }
 
   return {
     kind: 'capturing',
-    label: 'Capturing',
-    detail: `${watchedDomain} is watched. ${facts.tabEntryCount} ${facts.tabEntryCount === 1 ? 'entry' : 'entries'} captured on this tab.`,
+    label: t('scope.capturing.label'),
+    detail: t.plural(
+      facts.tabEntryCount,
+      'scope.capturing.detail.one',
+      'scope.capturing.detail.other',
+      { domain: watchedDomain },
+    ),
     offerDomain: null,
   };
 }
@@ -159,7 +172,7 @@ export interface DepthAvailability {
  * disabled — a store holding nothing still has to be exportable, so the emptiness is stated by a
  * report rather than by a surface that refuses to produce one.
  */
-export function depthAvailability(coveredMinutes: number): DepthAvailability[] {
+export function depthAvailability(coveredMinutes: number, t: Translator): DepthAvailability[] {
   return EXPORT_DEPTHS_MINUTES.map((depthMinutes, index) => {
     const previous = EXPORT_DEPTHS_MINUTES[index - 1];
     if (previous === undefined || coveredMinutes >= previous) {
@@ -168,7 +181,7 @@ export function depthAvailability(coveredMinutes: number): DepthAvailability[] {
     return {
       depthMinutes,
       enabled: false,
-      reason: `needs ${previous} min of capture, ${minutes(coveredMinutes)} min held`,
+      reason: t('export.depth.locked', { previous, held: minutes(coveredMinutes) }),
     };
   });
 }
@@ -210,15 +223,17 @@ export function resolveCurrentDepth(
  * window held nothing has already pasted an empty report somewhere; the phase requires the
  * emptiness to be known first, so it is stated here, on open (`phase-8.md:133`).
  */
-export function tabContextLine(facts: PopupFacts): string {
+export function tabContextLine(facts: PopupFacts, t: Translator): string {
   const { subject } = facts;
-  if (!subject) return 'No tab selected.';
+  if (!subject) return t('popup.context.none');
 
-  const who = `${facts.watchedDomain ?? subject.host} · tab ${subject.tabId}`;
-  if (facts.tabEntryCount === 0) {
-    return `${who} · nothing captured on this tab yet, so a report would come out empty.`;
-  }
-  return `${who} · ${minutes(facts.coveredMinutes)} min available, ${facts.tabEntryCount} entries on this tab.`;
+  const who = { domain: facts.watchedDomain ?? subject.host, tabId: subject.tabId };
+  if (facts.tabEntryCount === 0) return t('popup.context.empty', who);
+
+  return t.plural(facts.tabEntryCount, 'popup.context.held.one', 'popup.context.held.other', {
+    ...who,
+    minutes: minutes(facts.coveredMinutes),
+  });
 }
 
 /**
@@ -240,21 +255,32 @@ export interface ExportFeedbackView {
   detail: string;
 }
 
-/** Before any click. Says the gesture exists, and does not pretend anything has been written. */
-export const IDLE_FEEDBACK: ExportFeedbackView = {
-  kind: 'idle',
-  headline: 'Nothing exported yet',
-  detail: 'One click, and the report lands in your downloads as a Markdown file.',
-};
+/**
+ * Before any click. Says the gesture exists, and does not pretend anything has been written.
+ *
+ * A function rather than the constant it used to be: a frozen object is a sentence chosen once, at
+ * module load, in whichever language was current then — and this one is on screen every time the
+ * popup opens.
+ */
+export function idleFeedback(t: Translator): ExportFeedbackView {
+  return { kind: 'idle', headline: t('export.idle.headline'), detail: t('export.idle.detail') };
+}
 
 /** Between the click and the answer. The depth is repeated: it is what the wait is for. */
-export function workingFeedback(depthMinutes: ExportDepthMinutes): ExportFeedbackView {
-  return { kind: 'working', headline: `Cutting the last ${depthMinutes} min…`, detail: '' };
+export function workingFeedback(
+  depthMinutes: ExportDepthMinutes,
+  t: Translator,
+): ExportFeedbackView {
+  return {
+    kind: 'working',
+    headline: t('export.working.headline', { minutes: depthMinutes }),
+    detail: '',
+  };
 }
 
 /** The report was never rendered at all, and the reason is the worker's own words. */
-export function exportFailure(reason: string): ExportFeedbackView {
-  return { kind: 'failed', headline: 'Export failed', detail: reason };
+export function exportFailure(reason: string, t: Translator): ExportFeedbackView {
+  return { kind: 'failed', headline: t('export.failed.headline'), detail: reason };
 }
 
 /**
@@ -274,12 +300,13 @@ export function downloadAcknowledgement(
   bundle: ReportBundle,
   filename: string,
   outcome: DownloadOutcome,
+  t: Translator,
 ): ExportFeedbackView {
   if (!outcome.ok) {
     return {
       kind: 'failed',
-      headline: 'Not saved',
-      detail: `The report is ready, but the browser refused to write it: ${outcome.reason}`,
+      headline: t('export.refused.headline'),
+      detail: t('export.refused.detail', { reason: outcome.reason }),
     };
   }
 
@@ -288,26 +315,43 @@ export function downloadAcknowledgement(
 
   const held =
     count === 0
-      ? `Nothing was captured on this tab in the last ${minutes(requestedDepthMinutes)} min, so the report is empty.`
-      : `${count} ${count === 1 ? 'entry' : 'entries'}.`;
+      ? t('export.saved.empty', { minutes: minutes(requestedDepthMinutes) })
+      : t.plural(count, 'export.saved.entries.one', 'export.saved.entries.other');
 
   // A tenth of a minute of slack: the covered depth is a measured duration, and the two are equal
   // in every way a reader cares about long before they are equal as floats.
   const shorter =
     coveredDepthMinutes < requestedDepthMinutes - 0.05
-      ? `It covers ${minutes(Number(coveredDepthMinutes.toFixed(1)))} min, not the ${requestedDepthMinutes} min asked: the capture does not reach further back.`
+      ? t('export.saved.shorter', {
+          covered: minutes(Number(coveredDepthMinutes.toFixed(1))),
+          requested: requestedDepthMinutes,
+        })
       : '';
 
   const gaps =
     bundle.gaps.length === 0
       ? ''
-      : `Declared in the report: ${bundle.gaps.map((gap) => GAP_SUMMARIES[gap.kind]).join(', ')}.`;
+      : t('export.saved.gaps', {
+          gaps: bundle.gaps.map((gap) => t(gapSummaryKey(gap.kind))).join(', '),
+        });
 
   return {
     kind: 'downloaded',
-    headline: `Saved ${filename}`,
+    headline: t('export.saved.headline', { filename }),
     detail: [held, shorter, gaps].filter((part) => part.length > 0).join(' '),
   };
+}
+
+/**
+ * The short form of a gap, keyed on the kind and never on the English sentence.
+ *
+ * The contract carries two wordings for the same four gaps, and they part company here.
+ * `GAP_STATEMENTS` is rendered in the report and stays English, the report being outside this
+ * translation (`prd.md:55`); the summaries the popup shows are catalog entries. `GapKind` is the
+ * seam that keeps the two from being confused for one another.
+ */
+function gapSummaryKey(kind: GapKind): MessageKey {
+  return `export.gap.${kind}`;
 }
 
 export interface InterruptionNoticeView {
@@ -331,13 +375,13 @@ export interface InterruptionNoticeView {
  * `null` is the normal case. Returning it rather than a "nothing happened" view is what lets the
  * surfaces render the block or not without holding the rule themselves.
  */
-export function interruptionNotice(interrupted: boolean): InterruptionNoticeView | null {
+export function interruptionNotice(
+  interrupted: boolean,
+  t: Translator,
+): InterruptionNoticeView | null {
   if (!interrupted) return null;
 
-  return {
-    label: 'Capture interrupted',
-    detail: 'Vigie was updated, and the update stopped the capture that was running.',
-  };
+  return { label: t('interruption.label'), detail: t('interruption.detail') };
 }
 
 /**
@@ -403,15 +447,23 @@ export interface DeepLayerFacts {
  * service worker die without a word, so a layer offered there would arm, put the banner up, and stop
  * capturing at the first idle moment. The reason is named — a refusal with no reason reads as a bug.
  */
-export function deepLayerView(facts: DeepLayerFacts): DeepLayerView {
+export function deepLayerView(facts: DeepLayerFacts, t: Translator): DeepLayerView {
+  const start: DeepLayerAction = { label: t('deep.start'), intent: 'start' };
+
   if (!facts.support.supported) {
+    // A version below the threshold always carries its number (`support.ts:89`); the type is the
+    // one that cannot say so. Left out rather than blanked if it ever were absent, so the sentence
+    // would read as the defect it is instead of as one that meant to say nothing.
+    const chrome = facts.support.chromeMajorVersion;
+    const version: MessageParams = chrome === null ? {} : { version: chrome };
+
     return {
       kind: 'unavailable',
-      label: 'Deep capture unavailable',
+      label: t('deep.unavailable.label'),
       detail:
         facts.support.reason === 'below-keepalive'
-          ? `Chrome ${facts.support.chromeMajorVersion} cannot keep the capture running in the background. Response bodies need Chrome ${KEEPALIVE_CHROME_VERSION} or later.`
-          : 'This browser is not a Chrome, so the response body capture cannot run here. Everything else keeps working.',
+          ? t('deep.unavailable.version', { ...version, required: KEEPALIVE_CHROME_VERSION })
+          : t('deep.unavailable.browser'),
       action: null,
     };
   }
@@ -419,27 +471,25 @@ export function deepLayerView(facts: DeepLayerFacts): DeepLayerView {
   if (facts.canceledByUser) {
     return {
       kind: 'canceled',
-      label: 'Deep capture stopped from the banner',
-      detail:
-        'You canceled from the Chrome banner, which ended every session at once. Nothing will re-attach on its own — start it again whenever you want it back.',
-      action: { label: 'Start deep capture', intent: 'start' },
+      label: t('deep.canceled.label'),
+      detail: t('deep.canceled.detail'),
+      action: start,
     };
   }
 
   if (facts.armed) {
     return {
       kind: 'active',
-      label: 'Deep capture on',
-      detail: `Response bodies are being captured on ${facts.attachedTabs} watched ${facts.attachedTabs === 1 ? 'tab' : 'tabs'}. The Chrome banner stays up until you stop it.`,
-      action: { label: 'Stop deep capture', intent: 'stop' },
+      label: t('deep.active.label'),
+      detail: t.plural(facts.attachedTabs, 'deep.active.detail.one', 'deep.active.detail.other'),
+      action: { label: t('deep.stop'), intent: 'stop' },
     };
   }
 
   return {
     kind: 'stopped',
-    label: 'Deep capture off',
-    detail:
-      'Requests are captured, their response bodies are not. Turning it on attaches the Chrome debugger to every watched tab, and Chrome shows a banner on them until you stop it.',
-    action: { label: 'Start deep capture', intent: 'start' },
+    label: t('deep.stopped.label'),
+    detail: t('deep.stopped.detail'),
+    action: start,
   };
 }

@@ -23,6 +23,16 @@ interface ExtensionOptions {
    * into eight copies of the same setup. `'pristine'` is for the specs about the gate itself.
    */
   consent: 'accepted' | 'pristine';
+  /**
+   * The language Chrome announces to the extension, which decides what the interface speaks on a
+   * profile that never chose one.
+   *
+   * Pinned to English for the whole suite because the assertions are written in English: without
+   * it, running the suite on a French machine would fail every one of them, and the failure would
+   * read as a broken product rather than as a translated one. `ui-language.spec.ts` overrides it
+   * with `test.use` — it is the one spec whose subject is the language itself.
+   */
+  uiLanguage: string;
 }
 
 interface ExtensionFixtures {
@@ -42,8 +52,9 @@ interface ExtensionFixtures {
 export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
   extensionPath: [UNPACKED_BUILD, { option: true }],
   consent: ['accepted', { option: true }],
+  uiLanguage: ['en-US', { option: true }],
 
-  context: async ({ extensionPath }, use) => {
+  context: async ({ extensionPath, uiLanguage }, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), 'vigie-e2e-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
       // Extensions do not load in the headless shell; the full Chromium build is required.
@@ -51,6 +62,7 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
       args: [
         `--disable-extensions-except=${extensionPath}`,
         `--load-extension=${extensionPath}`,
+        `--lang=${uiLanguage}`,
       ],
     });
 

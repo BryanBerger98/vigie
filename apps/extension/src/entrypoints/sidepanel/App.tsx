@@ -19,6 +19,7 @@ import {
   type SubjectTab,
 } from '@/entrypoints/popup/state';
 import { resolveSubjectTab } from '@/entrypoints/popup/subject-tab';
+import { useI18n } from '@/i18n/I18nProvider';
 import { observeTabWindow, type TabWindow } from '@/storage/live-query';
 import {
   EMPTY_STORAGE_STATE,
@@ -93,6 +94,7 @@ function watchDomainFromPanel(domain: string): void {
 }
 
 export default function App() {
+  const { t } = useI18n();
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [scope, setScope] = useState<Scope | null>(null);
   const [storage, setStorage] = useState<StorageState>(EMPTY_STORAGE_STATE);
@@ -214,8 +216,8 @@ export default function App() {
           now: thread?.readAt ?? scope.readAt,
         };
 
-  const status = facts ? scopeStatus(facts) : null;
-  const notice = interruptionNotice(interrupted);
+  const status = facts ? scopeStatus(facts, t) : null;
+  const notice = interruptionNotice(interrupted, t);
   // The two states in which something is being captured. In the other two the thread is absent
   // rather than empty, so the surface says why instead of showing nothing (`phase-10.md:132`).
   const readable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
@@ -248,11 +250,11 @@ export default function App() {
           <ScopeStatus status={status} onWatch={watchDomainFromPanel} />
         ) : (
           <p data-testid="scope-loading" className="text-xs text-muted-foreground">
-            Reading the scope of this tab…
+            {t('scope.loading')}
           </p>
         )}
 
-        {readable && facts ? <TabContextLine text={tabContextLine(facts)} /> : null}
+        {readable && facts ? <TabContextLine text={tabContextLine(facts, t)} /> : null}
       </header>
 
       {readable && thread && facts ? (

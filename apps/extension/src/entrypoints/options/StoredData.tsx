@@ -1,3 +1,5 @@
+import { useI18n } from '@/i18n/I18nProvider';
+import type { Translator } from '@/i18n/translate';
 import { RETENTION_MS } from '@/storage/prune';
 import { captureMetrics, type CaptureMetrics } from '@/storage/metrics';
 import { requestPurge } from '@/storage/purge';
@@ -20,7 +22,12 @@ import { Button } from '@/ui/components/button';
 
 const MS_PER_MINUTE = 60_000;
 
-/** Bytes at a glance. The unrounded figures belong to the measurement series, not to a settings row. */
+/**
+ * Bytes at a glance. The unrounded figures belong to the measurement series, not to a settings row.
+ *
+ * No translator here on purpose: `B`, `kB` and `MB` are international symbols, and a language that
+ * renamed them would be describing a different measurement.
+ */
 function bytes(value: number | null): string {
   if (value === null) return '—';
   if (value < 1024) return `${Math.round(value)} B`;
@@ -29,15 +36,16 @@ function bytes(value: number | null): string {
 }
 
 /** How long ago the oldest entry was captured, in the words a person would use out loud. */
-export function ageOfOldest(oldestEntryAt: number | null, now: number): string {
-  if (oldestEntryAt === null) return 'nothing stored';
+export function ageOfOldest(t: Translator, oldestEntryAt: number | null, now: number): string {
+  if (oldestEntryAt === null) return t('store.oldest.none');
   const minutes = Math.max(0, now - oldestEntryAt) / MS_PER_MINUTE;
-  if (minutes < 1) return 'less than a minute ago';
-  if (minutes < 60) return `${Math.round(minutes)} min ago`;
-  return `${(minutes / 60).toFixed(1)} h ago`;
+  if (minutes < 1) return t('store.oldest.recent');
+  if (minutes < 60) return t('store.oldest.minutes', { count: Math.round(minutes) });
+  return t('store.oldest.hours', { count: (minutes / 60).toFixed(1) });
 }
 
 export function StoredData() {
+  const { t } = useI18n();
   const [metrics, setMetrics] = useState<CaptureMetrics | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -72,34 +80,34 @@ export function StoredData() {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium">What is stored right now</h2>
+      <h2 className="text-sm font-medium">{t('store.title')}</h2>
 
       {metrics === null ? (
         <p data-testid="stored-loading" className="text-sm text-muted-foreground">
-          Loading…
+          {t('common.loading')}
         </p>
       ) : (
         <>
           <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Entries held</dt>
+            <dt className="text-muted-foreground">{t('store.count')}</dt>
             <dd data-testid="stored-entries" className="text-right font-mono tabular-nums">
               {metrics.entryCount}
             </dd>
 
-            <dt className="text-muted-foreground">Space used</dt>
+            <dt className="text-muted-foreground">{t('store.bytes')}</dt>
             <dd data-testid="stored-bytes" className="text-right font-mono tabular-nums">
               {bytes(metrics.storeBytes)}
             </dd>
 
-            <dt className="text-muted-foreground">Oldest entry</dt>
+            <dt className="text-muted-foreground">{t('store.oldest')}</dt>
             <dd data-testid="stored-oldest" className="text-right font-mono tabular-nums">
-              {ageOfOldest(metrics.oldestEntryAt, metrics.takenAt)}
+              {ageOfOldest(t, metrics.oldestEntryAt, metrics.takenAt)}
             </dd>
           </dl>
 
           {empty ? (
             <p data-testid="stored-empty" className="text-sm text-muted-foreground">
-              Nothing captured yet. Vigie writes only while a watched domain is open.
+              {t('store.empty')}
             </p>
           ) : (
             <ul data-testid="stored-by-domain" className="flex flex-col gap-1 text-sm">
@@ -122,7 +130,7 @@ export function StoredData() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        {`Anything captured more than ${Math.round(RETENTION_MS / MS_PER_MINUTE)} minutes ago is deleted on its own. Erasing everything below does not stop the capture: watched domains stay watched, and the next hour starts from empty.`}
+        {t('store.retention', { minutes: Math.round(RETENTION_MS / MS_PER_MINUTE) })}
       </p>
 
       <div className="flex items-center gap-3">
@@ -133,16 +141,16 @@ export function StoredData() {
           disabled={busy}
           onClick={() => void purge()}
         >
-          Erase everything captured
+          {t('store.purge')}
         </Button>
         <Button data-testid="stored-refresh" variant="ghost" size="sm" onClick={() => void read()}>
-          Refresh
+          {t('store.refresh')}
         </Button>
       </div>
 
       {failure ? (
         <p data-testid="purge-failed" className="text-sm text-destructive">
-          {`Could not erase the capture: ${failure}`}
+          {t('store.purge.failed', { reason: failure })}
         </p>
       ) : null}
     </section>

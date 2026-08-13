@@ -7,10 +7,12 @@ import {
   readConsent,
   type ConsentState,
 } from '@/consent/state';
+import { useI18n } from '@/i18n/I18nProvider';
 import { onWatchedDomainsChanged, readWatchedDomainsWithAccess, type WatchedDomain } from '@/storage/watched-domains';
 import { Button } from '@/ui/components/button';
 
 import { AddDomainForm } from './AddDomainForm';
+import { LanguageSetting } from './LanguageSetting';
 import { StoredData } from './StoredData';
 import { WatchedDomainList } from './WatchedDomainList';
 
@@ -38,6 +40,7 @@ function requestedDomain(): string {
 }
 
 export default function App() {
+  const { t } = useI18n();
   const [consent, setConsent] = useState<ConsentState | null>(null);
   const [domains, setDomains] = useState<WatchedDomain[] | null>(null);
 
@@ -82,22 +85,25 @@ export default function App() {
     <main data-testid="options-root" className="mx-auto flex max-w-2xl flex-col gap-6 p-8">
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold">Vigie</h1>
-        <p className="text-sm text-muted-foreground">
-          Vigie only captures on the domains listed below, and only while the browser grants it
-          access to them.
-        </p>
+        <p className="text-sm text-muted-foreground">{t('options.intro')}</p>
       </header>
+
+      {/*
+        Above the gate, not inside it: the disclosure has to be readable in the user's own language
+        before they are asked to agree to it, so the language cannot be locked behind that answer.
+      */}
+      <LanguageSetting />
 
       {locked && consent ? (
         <ConsentRequired state={consent} />
       ) : (
         <>
           <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium">Watched domains</h2>
+            <h2 className="text-sm font-medium">{t('domains.title')}</h2>
 
             {domains === null ? (
               <p data-testid="watched-domains-loading" className="text-sm text-muted-foreground">
-                Loading…
+                {t('common.loading')}
               </p>
             ) : (
               <WatchedDomainList domains={domains} onRemoved={() => void refresh()} />
@@ -114,7 +120,7 @@ export default function App() {
             disclosure nobody can go back and check (`consent/Disclosure.tsx:9`).
           */}
           <section className="flex flex-col gap-3 border-t pt-5">
-            <h2 className="text-sm font-medium">What Vigie records</h2>
+            <h2 className="text-sm font-medium">{t('consent.heading')}</h2>
             <Disclosure />
             <div>
               <Button
@@ -123,7 +129,7 @@ export default function App() {
                 size="sm"
                 onClick={() => void openConsentScreen()}
               >
-                Open the full disclosure
+                {t('options.disclosure.open')}
               </Button>
             </div>
           </section>

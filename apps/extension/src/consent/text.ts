@@ -1,18 +1,29 @@
+import { DEFAULT_LOCALE, type LocaleCode, type MessageKey } from '@/i18n/registry';
+
 /**
- * The disclosure, written once and rendered everywhere.
+ * The disclosure, named once and rendered everywhere.
  *
  * The Chrome Web Store policy update of 2026-08-01 requires the disclosure to be prominent *in the
  * product*, not only in a linked privacy policy (`deployment.md:40`). It also requires the two to
  * agree: a policy that describes something the screen does not is a rejection motive on its own.
- * Keeping the sentences in one module is what makes that agreement structural — the consent screen
- * and the settings render this, and `docs/privacy-policy.md` is written from it word for word.
+ * This module is what makes that agreement structural — it holds the list of what is announced, the
+ * consent screen and the settings render it, and each published policy is written from it.
  *
- * ## Why a version number lives next to the text
+ * What lives here is now the *shape* of the disclosure: which categories are announced, in which
+ * order, under which key. The sentences themselves live in the catalogs, because the same
+ * disclosure has to exist in every language the extension ships.
  *
- * Consent is consent to *these* words. Adding a captured category to a build whose users already
- * agreed to the previous wording would leave the disclosure covering less than the capture does,
- * which is the failure the policy is about. Bumping `CONSENT_TEXT_VERSION` in the same edit that
- * changes a sentence is what makes the extension ask again (`consent/state.ts:33`).
+ * ## Why a version number lives next to it
+ *
+ * Consent is consent to a capture, not to a wording. Adding a captured category to a build whose
+ * users already agreed to the previous disclosure would leave it covering less than the capture
+ * does, which is the failure the policy is about. Bumping `CONSENT_TEXT_VERSION` is what makes the
+ * extension ask again (`consent/state.ts:33`).
+ *
+ * So: **a category added, removed or widened carries the version. A sentence rendered in another
+ * language does not.** Translating asks nothing of anyone (`prd.md:108`) — the person who agreed
+ * agreed to this capture, and it has not changed. `text.test.ts` is what holds the two apart: it
+ * pins the version to the announced categories, so a bump that no category justifies fails there.
  *
  * ## What is deliberately absent
  *
@@ -22,49 +33,65 @@
  */
 
 /**
- * The wording currently shipped. Bump it in the same commit that edits any sentence in this file.
+ * The capture currently disclosed. Bump it when what Vigie records changes, never when a sentence
+ * about it changes.
  *
  * A stored number greater than this one — a downgrade — is treated as valid rather than stale:
  * whoever accepted it saw at least this much.
  */
-export const CONSENT_TEXT_VERSION = 1;
+export const CONSENT_TEXT_VERSION = 2;
 
-/** Where the same words live in their public form. Published to GitHub Pages in phase 11. */
-export const PRIVACY_POLICY_URL = 'https://bryanberger98.github.io/vigie/privacy-policy.html';
+/** The published policy, in the language the reader is being asked to agree in. */
+const PRIVACY_POLICY_URLS: Readonly<Record<LocaleCode, string>> = {
+  en: 'https://bryanberger98.github.io/vigie/privacy-policy.html',
+  fr: 'https://bryanberger98.github.io/vigie/politique-de-confidentialite.html',
+};
 
-export interface DisclosureItem {
-  /** Short handle, also the anchor an end-to-end assertion counts on. */
-  id: string;
-  title: string;
-  body: string;
+const FALLBACK_PRIVACY_POLICY_URL = 'https://bryanberger98.github.io/vigie/privacy-policy.html';
+
+/**
+ * Where the same words live in their public form.
+ *
+ * A language with no published policy falls back to the English one rather than to a dead link:
+ * an unreachable policy is worse than one in the wrong language, since the Web Store treats a
+ * broken policy link as a missing policy (`deployment.md:33`).
+ */
+export function privacyPolicyUrl(locale: LocaleCode): string {
+  return PRIVACY_POLICY_URLS[locale] ?? PRIVACY_POLICY_URLS[DEFAULT_LOCALE] ?? FALLBACK_PRIVACY_POLICY_URL;
 }
 
-export const CONSENT_HEADING = 'What Vigie records';
+export interface DisclosureItem {
+  /** Short handle, also the anchor an end-to-end assertion counts on, in every language. */
+  id: string;
+  title: MessageKey;
+  body: MessageKey;
+}
+
+export const CONSENT_HEADING = 'consent.heading' satisfies MessageKey;
 
 /** The single sentence the screen opens on: what the capture is for, before what it is. */
-export const CONSENT_PROMISE =
-  'Vigie keeps the last hour of what your browser does on the domains you designate, so you can hand over the context of a bug that already happened instead of trying to reproduce it.';
+export const CONSENT_PROMISE = 'consent.promise' satisfies MessageKey;
 
 /**
  * The three categories the capture writes to disk. One per capture layer, and the list is
- * exhaustive: a fourth layer added later has to add its paragraph here, or the disclosure stops
- * covering the capture.
+ * exhaustive: a fourth layer added later has to add its entry here, or the disclosure stops
+ * covering the capture — and adding one is exactly what carries `CONSENT_TEXT_VERSION`.
  */
 export const CAPTURED: readonly DisclosureItem[] = [
   {
     id: 'network',
-    title: 'Network traffic',
-    body: 'Every request a watched tab makes: its URL, its method, its status code, its timing, and its raw request and response headers. Those headers carry authentication tokens, session cookies and API keys. Response bodies are never captured.',
+    title: 'consent.captured.network.title',
+    body: 'consent.captured.network.body',
   },
   {
     id: 'console',
-    title: 'Console output',
-    body: 'Everything the page writes to the console — log, info, warn, error and debug — with its arguments serialised as text. Whatever an application logs, including data about the people using it, is recorded exactly as it was logged.',
+    title: 'consent.captured.console.title',
+    body: 'consent.captured.console.body',
   },
   {
     id: 'error',
-    title: 'JavaScript errors',
-    body: 'Uncaught exceptions and unhandled promise rejections, with their message and their stack trace.',
+    title: 'consent.captured.error.title',
+    body: 'consent.captured.error.body',
   },
 ];
 
@@ -75,20 +102,20 @@ export const CAPTURED: readonly DisclosureItem[] = [
 export const NOT_CAPTURED: readonly DisclosureItem[] = [
   {
     id: 'local',
-    title: 'Nothing leaves this machine',
-    body: 'Vigie has no server, no account and no telemetry. What it records stays in this browser profile until you copy a report yourself.',
+    title: 'consent.limit.local.title',
+    body: 'consent.limit.local.body',
   },
   {
     id: 'scope',
-    title: 'Nothing outside the domains you designate',
-    body: 'Capture happens only on the domains you add, and only while the browser grants Vigie access to them. Every other site is never observed and never stored.',
+    title: 'consent.limit.scope.title',
+    body: 'consent.limit.scope.body',
   },
   {
     id: 'hour',
-    title: 'Nothing older than one hour',
-    body: 'Anything captured more than an hour ago is deleted. You can also erase everything at once from the settings, at any time.',
+    title: 'consent.limit.hour.title',
+    body: 'consent.limit.hour.body',
   },
 ];
 
 /** The label on the one control that unblocks the product. */
-export const CONSENT_ACCEPT_LABEL = 'I agree — start capturing';
+export const CONSENT_ACCEPT_LABEL = 'consent.accept' satisfies MessageKey;

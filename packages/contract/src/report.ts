@@ -58,8 +58,13 @@ export const GAP_STATEMENTS: Record<GapKind, string> = {
  *
  * A popup is a few hundred pixels wide and cannot render `GAP_STATEMENTS` without burying the
  * button underneath them, but a user who copies a report has to leave knowing what it does not
- * hold. These are that summary, and they live beside the full sentences for the same reason those
- * do: two surfaces naming the same gap differently would read as two different gaps.
+ * hold. These are that summary, in English, for any consumer that has no catalog of its own.
+ *
+ * Of the two sets, only `GAP_STATEMENTS` crosses an interface: it is rendered *in the report*, which
+ * stays English whatever the interface language is, so a report read by someone else says the same
+ * thing as the one that produced it. The summaries are rendered *in the extension*, which follows
+ * the chosen language, and the extension therefore keys its own translations on `GapKind` rather
+ * than reading these strings. `GapKind` is what keeps the two from being confused for one another.
  */
 export const GAP_SUMMARIES: Record<GapKind, string> = {
   'response-bodies-unavailable': 'no response bodies without the deep layer',

@@ -35,6 +35,7 @@ flowchart TD
 - `apps/extension/src/storage/`: `db.ts` for the Dexie schema and the one-hour context pruning, `opfs.ts` for the segments of a running recording. The watched-domain filter sits on the write path here, so unwatched traffic never reaches disk. See `database.md`.
 - `apps/extension/src/export/`: report assembly, the Markdown rendering an AI consumes, and the download that writes it to a file.
 - `apps/extension/src/consent/`: the first-run consent screen. A Chrome Web Store requirement, not a UX nicety.
+- `apps/extension/src/i18n/`: the message catalogs the four surfaces read, the provider that hands them down, and the stored language preference. `catalogs/en.ts` is the reference — its keys are the type — and any other catalog is partial, so a missing key falls back to English rather than showing a key. Nothing here touches `_locales/`, which localises the manifest and the store listing only.
 - `apps/extension/src/ui/`: shared React components across popup, side panel, and options.
 - `apps/extension/src/shared/chrome-apis.d.ts`: local declarations for the MV3 surfaces Chrome's typings still miss.
 - `e2e/`: Playwright, running against the unpacked build.

@@ -5,9 +5,21 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'Vigie',
-    description:
-      'Captures network traffic, console output and JS errors on the domains you designate, and hands you a Markdown report of the active tab.',
+    // The two strings the browser itself renders — the extension list, the store listing — come
+    // from `public/_locales/`, not from the runtime catalog the four surfaces read. `chrome.i18n`
+    // resolves these placeholders once, at load, against the *browser's* language, and accepts no
+    // override afterwards: that is what makes it the only way to localise a store listing, and
+    // what makes it unusable for a surface whose language the user picks in the settings.
+    //
+    // The consequence is worth knowing before it is reported as a bug: a browser in English with
+    // Vigie set to French shows a French interface and an English description in
+    // `chrome://extensions`. Nothing on our side can reconcile the two.
+    //
+    // `default_locale` is mandatory as soon as a `_locales` directory exists, and it is what an
+    // unlisted language falls back to — a German browser reads the English pair.
+    name: '__MSG_extName__',
+    description: '__MSG_extDescription__',
+    default_locale: 'en',
     // No `version` here on purpose: WXT reads it from `package.json` and only falls back to this
     // field (`wxt/dist/core/utils/manifest.mjs:33`). Declaring it twice is how a store listing ends
     // up announcing a version the workspace never built.

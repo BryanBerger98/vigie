@@ -1,5 +1,6 @@
 import { Settings } from 'lucide-react';
 
+import { useI18n } from '@/i18n/I18nProvider';
 import { Button } from '@/ui/components/button';
 
 /**
@@ -14,6 +15,8 @@ import { Button } from '@/ui/components/button';
  * flow, and it cost the one action that *is* a step half of its width.
  */
 export function PopupHeader() {
+  const { t } = useI18n();
+
   return (
     <header data-testid="popup-header" className="flex items-center gap-2">
       {/* Empty `alt`: the title sits right beside it and says the same thing. The artwork is the
@@ -31,13 +34,15 @@ export function PopupHeader() {
       <div className="flex-1" />
 
       {/* `title` rather than a tooltip primitive: none exists in this project, and an icon button
-          whose only affordance is a hover card is one this phase has no reason to introduce. */}
+          whose only affordance is a hover card is one this phase has no reason to introduce. Both
+          carry the same sentence, and both follow the language: an icon with an English label in a
+          French interface is an icon with no label for whoever needs one. */}
       <Button
         data-testid="open-options"
         variant="ghost"
         size="icon"
-        aria-label="Open the settings"
-        title="Open the settings"
+        aria-label={t('popup.settings')}
+        title={t('popup.settings')}
         onClick={() => void browser.runtime.openOptionsPage()}
       >
         <Settings aria-hidden="true" className="size-4" />
