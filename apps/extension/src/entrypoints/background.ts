@@ -9,6 +9,17 @@ import {
   type CaptureBinding,
   type MeasurementState,
 } from '@/capture/network/listener-lifecycle';
+import { resumeDeepLayer } from '@/capture/cdp/resume';
+import {
+  START_DEEP_LAYER_MESSAGE,
+  STOP_DEEP_LAYER_MESSAGE,
+  followDeepLayerScope,
+  handleDeepLayerDetach,
+  reconcileDeepLayer,
+  startDeepLayer,
+  stopDeepLayer,
+} from '@/capture/cdp/session';
+import { markCaptureInterrupted } from '@/capture/cdp/session-state';
 import { isRelayMessage } from '@/capture/console/bridge';
 import { applyConsoleCaptureScope } from '@/capture/console/registration';
 import { storeRelayedCapture } from '@/capture/console/store';
@@ -149,6 +160,32 @@ const networkProbe: CaptureBinding = {
   },
 };
 
+/** Chrome ended a deep layer session. The reason says whether it ended one of them or all of them. */
+function routeDeepLayerDetach(source: { tabId?: number }, reason: string): void {
+  console.info('[vigie] deep layer detached from tab %s (%s)', source.tabId ?? '?', reason);
+  void handleDeepLayerDetach(source.tabId, reason);
+}
+
+/**
+ * `chrome.debugger.onDetach`, registered only where the API exists.
+ *
+ * Measured on the shipped build: while the optional permission is not granted, `browser.debugger` is
+ * `undefined` in the worker — an absent namespace, not an API that refuses on use. A top-level
+ * registration would therefore throw on every start for every user who never arms the layer. So it
+ * is applied the way the capture listeners are, at each start and at each permission change, which
+ * is also what registers it the moment the popup obtains the grant.
+ */
+const deepLayerDetach: CaptureBinding = {
+  apply: () => {
+    const api: typeof browser.debugger | undefined = browser.debugger;
+    if (api) registerOnce(api.onDetach, routeDeepLayerDetach);
+  },
+  remove: () => {
+    const api: typeof browser.debugger | undefined = browser.debugger;
+    if (api) unregister(api.onDetach, routeDeepLayerDetach);
+  },
+};
+
 export default defineBackground(() => {
   console.info('[vigie] service worker started, contract schema v%d', SCHEMA_VERSION);
 
@@ -160,6 +197,15 @@ export default defineBackground(() => {
 
   networkProbe.apply();
   networkCapture.apply();
+  deepLayerDetach.apply();
+  // The deep layer follows the tabs from here on, and puts back what this start found missing. The
+  // order is the one that matters: subscribing first means a tab that moves while the resume is
+  // still running triggers its own reconciliation instead of being missed.
+  followDeepLayerScope();
+  void resumeDeepLayer().then((decision) => {
+    if (decision.resume) console.info('[vigie] deep layer resumed, %d session(s) lost', decision.lostTabs.length);
+    else console.info('[vigie] deep layer not resumed (%s)', decision.reason);
+  });
 
   // The consent lock. It is pushed to the write path rather than consulted there, because
   // `webRequest.onCompleted` is synchronous and a storage read is not (`storage/write.ts:80`).
@@ -177,7 +223,20 @@ export default defineBackground(() => {
   // A first launch, or an update that ships a wording the stored agreement no longer covers. The
   // screen is raised rather than waited for: a user who never opens the popup would otherwise run
   // an extension that captures nothing and never says why (`design.md:23`).
-  browser.runtime.onInstalled.addListener(() => {
+  //
+  // An update is also the one death the user has to be told about, and this listener is the only
+  // place the browser says so. Everything else that kills the worker has a resume — a stop lost 0
+  // entries and a crash 6, both came back on the next request — while an update takes the whole
+  // capture with it and gives nothing back, so it gets a mark and a notice and they do not.
+  //
+  // Three things around it were never measured, and the code should not be read as if they had
+  // been. A Web Store update has never been observed at all, only the reason string the API
+  // documents. `chrome.runtime.reload()` never restarts the worker on a `--load-extension` build,
+  // which is why the end-to-end suite poses the mark directly instead of provoking one. And an
+  // update leaves no worker running, so nothing here re-attaches anything: the resume above is
+  // guaranteed only at the next browser start, or at the next traffic that wakes a worker.
+  browser.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'update') void markCaptureInterrupted();
     void readConsent().then((state) => {
       if (!isCapturePermitted(state)) void openConsentScreen();
     });
@@ -207,6 +266,9 @@ export default defineBackground(() => {
     }
     networkProbe.apply();
     networkCapture.apply();
+    // The deep layer's perimeter is the same list: a domain added has to be attached without a
+    // restart, and a domain removed detached without one either.
+    void reconcileDeepLayer();
   });
 
   followHostPermissions(browser.permissions, networkProbe, (change, permissions) => {
@@ -217,17 +279,39 @@ export default defineBackground(() => {
       permissionChanges: [...state.permissionChanges, { change, origins, at: Date.now() }],
     }));
     networkCapture.apply();
+    // The `debugger` grant arrives on this event too, and it is what makes the namespace appear.
+    deepLayerDetach.apply();
   });
 
   // A tab closing is the last chance to write what its requests produced; anything still batched
   // would otherwise wait for traffic that will never come. The surfaces that read the store ask
   // for the same flush through `vigie:flush`, so a report never omits the last few requests.
+  //
+  // Registered after `followDeepLayerScope`, and that order matters: Chrome calls the listeners of
+  // one event in registration order, so the deep layer closes the tab's session window first and
+  // this flush then writes the held requests instead of leaving them to a session that is gone.
   browser.tabs.onRemoved.addListener(() => void flushNetworkCapture());
   // `sendResponse` and `return true`, not a returned promise: Chrome only supports the callback
   // form, and a promise here would answer `undefined` before the batch had been written.
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message === FLUSH_MESSAGE) {
       void flushNetworkCapture().then(() => sendResponse(true));
+      return true;
+    }
+
+    // The deep layer, armed and stopped from the popup and nowhere else. The permission is granted
+    // at install time and never asked for here: Chrome refuses `debugger` as an optional permission,
+    // so it is declared required (`wxt.config.ts:55`) and the popup arms the session rather than the
+    // grant. The state is answered so the caller can tell a start that did nothing from one that
+    // attached something.
+    if (message === START_DEEP_LAYER_MESSAGE || message === STOP_DEEP_LAYER_MESSAGE) {
+      const starting = message === START_DEEP_LAYER_MESSAGE;
+      if (starting) deepLayerDetach.apply();
+
+      (starting ? startDeepLayer() : stopDeepLayer()).then(sendResponse, (error: unknown) => {
+        console.error('[vigie] could not %s the deep layer', starting ? 'start' : 'stop', error);
+        sendResponse({ error: error instanceof Error ? error.message : String(error) });
+      });
       return true;
     }
 

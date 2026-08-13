@@ -18,7 +18,7 @@ export const MAX_EXPORT_DEPTH_MINUTES = 60;
  * to be inferred from an absence — a reader has to know what it cannot see before concluding.
  */
 export type GapKind =
-  /** `webRequest` never exposes response bodies. Structural, not a failure. */
+  /** The deep layer was not on this window, and nothing else reaches a response body. */
   | 'response-bodies-unavailable'
   /** CORS, CSP, mixed content, failed loads: never routed through `console.*`. */
   | 'browser-messages-out-of-reach'
@@ -44,7 +44,7 @@ export interface ReportGap {
  */
 export const GAP_STATEMENTS: Record<GapKind, string> = {
   'response-bodies-unavailable':
-    'Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.',
+    'Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.',
   'browser-messages-out-of-reach':
     'Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.',
   'capture-started-after-page-load':
@@ -62,7 +62,7 @@ export const GAP_STATEMENTS: Record<GapKind, string> = {
  * do: two surfaces naming the same gap differently would read as two different gaps.
  */
 export const GAP_SUMMARIES: Record<GapKind, string> = {
-  'response-bodies-unavailable': 'no response bodies',
+  'response-bodies-unavailable': 'no response bodies without the deep layer',
   'browser-messages-out-of-reach': 'no browser-generated messages',
   'capture-started-after-page-load': 'nothing before the page had loaded',
   'window-shrunk-by-quota': 'window shortened by storage pressure',
@@ -76,14 +76,17 @@ export function reportGap(kind: GapKind): ReportGap {
 /**
  * The gaps that hold for every report this version produces, whatever the capture observed.
  *
- * They are structural: no response body will ever be available, and no browser-generated message
- * will ever be captured without `chrome.debugger`. Stating them unconditionally is the point —
- * a reader must know what they cannot see before drawing a conclusion from an absence.
+ * One is left, and it is structural in the strict sense: a CORS refusal, a CSP violation and a
+ * blocked mixed-content load are printed by the browser itself and routed through no channel an
+ * extension can observe. Stating it unconditionally is the point — a reader must know what they
+ * cannot see before drawing a conclusion from an absence.
+ *
+ * Response bodies used to sit here and no longer do. The deep layer reaches them, so their absence
+ * has become a fact about one report rather than about the product, and `declareGaps` decides it per
+ * window. A gap that is stated when it does not hold costs more than one that is not stated at all:
+ * it teaches a reader to skip the header.
  */
-export const STRUCTURAL_GAPS: readonly GapKind[] = [
-  'response-bodies-unavailable',
-  'browser-messages-out-of-reach',
-];
+export const STRUCTURAL_GAPS: readonly GapKind[] = ['browser-messages-out-of-reach'];
 
 export interface ReportWindow {
   /** Depth the user asked for, before the one-hour ceiling and before what is actually held. */

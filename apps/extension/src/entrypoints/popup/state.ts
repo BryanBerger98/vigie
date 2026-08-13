@@ -5,6 +5,8 @@ import {
   type ReportBundle,
 } from '@vigie/contract';
 
+import type { DeepLayerSupport } from '@/capture/cdp/support';
+import { KEEPALIVE_CHROME_VERSION } from '@/capture/cdp/support';
 import type { DownloadOutcome } from '@/export/download';
 import { RETENTION_MS } from '@/storage/prune';
 
@@ -305,5 +307,139 @@ export function downloadAcknowledgement(
     kind: 'downloaded',
     headline: `Saved ${filename}`,
     detail: [held, shorter, gaps].filter((part) => part.length > 0).join(' '),
+  };
+}
+
+export interface InterruptionNoticeView {
+  /** What happened, spelled out. Never left to an icon alone (`design.md:28`). */
+  label: string;
+  detail: string;
+}
+
+/**
+ * The one death worth telling the user about, and the two facts it owes them.
+ *
+ * It says the extension was updated and that this stopped the capture. It does not say what to do
+ * about it — there is nothing to do — and above all it does not say whether the capture came back:
+ * the deep layer block sits directly under it and already answers that, in the present tense, from
+ * the state rather than from a memory. Repeating it here would be a second truth about the same
+ * thing, and the one written first would be the one that ages.
+ *
+ * A worker stop or a crash produces nothing to show. Both resume on the next request, so the notice
+ * would announce an interruption the user never had and cannot distinguish from a real one.
+ *
+ * `null` is the normal case. Returning it rather than a "nothing happened" view is what lets the
+ * surfaces render the block or not without holding the rule themselves.
+ */
+export function interruptionNotice(interrupted: boolean): InterruptionNoticeView | null {
+  if (!interrupted) return null;
+
+  return {
+    label: 'Capture interrupted',
+    detail: 'Vigie was updated, and the update stopped the capture that was running.',
+  };
+}
+
+/**
+ * Where the deep capture layer stands.
+ *
+ * It is the one capability of this product the user turns on themselves, and the only one with a
+ * visible price: while it runs Chrome puts a banner on every tab of the profile that the user cannot
+ * dismiss. So the block says what it costs before it is armed, and what is running once it is —
+ * anything less would be a banner appearing over a click that never mentioned it.
+ *
+ * `canceled` is a state of its own rather than a return to `stopped`. The user refused from Chrome's
+ * banner, not from this popup, and the surface that will not re-attach on its own has to say so —
+ * otherwise a layer showing "off" right after a refusal reads as a product that ignored it.
+ */
+export type DeepLayerKind = 'unavailable' | 'stopped' | 'active' | 'canceled';
+
+/** The one action the block offers, or `null` when the browser leaves nothing to offer. */
+export interface DeepLayerAction {
+  label: string;
+  intent: 'start' | 'stop';
+}
+
+export interface DeepLayerView {
+  kind: DeepLayerKind;
+  /** The state, spelled out. Never left to colour alone (`design.md:28`). */
+  label: string;
+  detail: string;
+  action: DeepLayerAction | null;
+}
+
+/**
+ * Whether the worker's answer to a start or a stop is a failure.
+ *
+ * The worker answers the session state when it worked and `{ error }` when it did not
+ * (`entrypoints/background.ts:310`), and the popup has to tell the two apart: a start that threw
+ * used to leave the button looking like it had done nothing, which is exactly how a permission the
+ * browser was refusing outright stayed invisible for a whole phase.
+ */
+export function isDeepLayerFailure(answer: unknown): answer is { error: string } {
+  return (
+    typeof answer === 'object' &&
+    answer !== null &&
+    typeof (answer as { error?: unknown }).error === 'string'
+  );
+}
+
+/** What the popup reads before it can render the block. */
+export interface DeepLayerFacts {
+  /** The browser's verdict, from `capture/cdp/support.ts`. */
+  support: DeepLayerSupport;
+  /** Whether the user armed the layer. */
+  armed: boolean;
+  /** Whether Chrome's banner Cancel took every session down. */
+  canceledByUser: boolean;
+  /** How many tabs hold a session right now. */
+  attachedTabs: number;
+}
+
+/**
+ * The four states, and the sentence each of them owes the user.
+ *
+ * Unavailability comes first and is unconditional: below Chrome 118 an attached session lets the
+ * service worker die without a word, so a layer offered there would arm, put the banner up, and stop
+ * capturing at the first idle moment. The reason is named — a refusal with no reason reads as a bug.
+ */
+export function deepLayerView(facts: DeepLayerFacts): DeepLayerView {
+  if (!facts.support.supported) {
+    return {
+      kind: 'unavailable',
+      label: 'Deep capture unavailable',
+      detail:
+        facts.support.reason === 'below-keepalive'
+          ? `Chrome ${facts.support.chromeMajorVersion} cannot keep the capture running in the background. Response bodies need Chrome ${KEEPALIVE_CHROME_VERSION} or later.`
+          : 'This browser is not a Chrome, so the response body capture cannot run here. Everything else keeps working.',
+      action: null,
+    };
+  }
+
+  if (facts.canceledByUser) {
+    return {
+      kind: 'canceled',
+      label: 'Deep capture stopped from the banner',
+      detail:
+        'You canceled from the Chrome banner, which ended every session at once. Nothing will re-attach on its own — start it again whenever you want it back.',
+      action: { label: 'Start deep capture', intent: 'start' },
+    };
+  }
+
+  if (facts.armed) {
+    return {
+      kind: 'active',
+      label: 'Deep capture on',
+      detail: `Response bodies are being captured on ${facts.attachedTabs} watched ${facts.attachedTabs === 1 ? 'tab' : 'tabs'}. The Chrome banner stays up until you stop it.`,
+      action: { label: 'Stop deep capture', intent: 'stop' },
+    };
+  }
+
+  return {
+    kind: 'stopped',
+    label: 'Deep capture off',
+    detail:
+      'Requests are captured, their response bodies are not. Turning it on attaches the Chrome debugger to every watched tab, and Chrome shows a banner on them until you stop it.',
+    action: { label: 'Start deep capture', intent: 'start' },
   };
 }

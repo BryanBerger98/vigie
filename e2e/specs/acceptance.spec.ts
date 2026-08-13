@@ -370,7 +370,7 @@ test('the report names the window, the domain and the tab, and declares its gaps
   // the header and then omitted from the entries is an absence a reader stops seeing.
   const requests = bundle!.entries.filter((entry) => entry.kind === 'network').length;
   expect(markdown).toContain('## What this report cannot show');
-  expect(markdown).toContain('Response bodies are not included.');
+  expect(markdown).toContain('Response bodies are not included:');
   expect(markdown!.split('· no response body').length - 1).toBe(requests);
 });
 
@@ -398,6 +398,7 @@ test('nothing older than an hour survives a simulated hour', async ({ context, e
       outcome: 'completed',
       statusCode: 200,
       resourceType: 'xmlhttprequest',
+      provenance: 'webRequest',
       responseBody: 'unavailable',
     });
 

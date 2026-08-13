@@ -31,6 +31,7 @@ function network(minutesAgo: number, id = `r${minutesAgo}`): NetworkEntry {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
   };
 }

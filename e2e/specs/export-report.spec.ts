@@ -137,6 +137,7 @@ function seedRequest(
     outcome: 'completed',
     statusCode: 200,
     resourceType: 'xmlhttprequest',
+    provenance: 'webRequest',
     responseBody: 'unavailable',
     ...entry,
   });
@@ -300,7 +301,9 @@ test('writes the unavailability of every response body', async ({ context, exten
   // request already had rather than a paragraph of its own — stated is the requirement, repeated
   // as a sentence three hundred times is not.
   expect(markdown!.split('· no response body').length - 1).toBe(requests);
-  expect(markdown).toContain('Response bodies are not included.');
+  // Declared, because this build never arms the deep layer. A report cut from a tab it covered
+  // does not carry it — `cdp-response-body.spec.ts` states that side.
+  expect(markdown).toContain('Response bodies are not included:');
 });
 
 test('marks what went wrong so a reader reaches it without reading the thread', async ({

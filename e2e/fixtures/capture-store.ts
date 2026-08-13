@@ -23,7 +23,10 @@ export interface StoredEntry {
   outcome?: string;
   statusCode?: number;
   error?: string;
+  provenance?: string;
+  resourceType?: string;
   responseBody?: string;
+  responseBodyText?: string;
   requestHeaders?: { name: string; value: string }[];
   responseHeaders?: { name: string; value: string }[];
 }

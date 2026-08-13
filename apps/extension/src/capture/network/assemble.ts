@@ -172,8 +172,12 @@ function finish(request: OpenRequest, closing: Closing): AssembledEntry {
     method: request.method,
     url: request.url,
     outcome: closing.outcome,
+    // This module is the `webRequest` layer and nothing else, so every entry it closes says so.
+    // The deep layer never completes one of these: it substitutes its own entry or it stays out.
+    provenance: 'webRequest',
     // Stated, never omitted: `webRequest` gives no access to a response body in any Chrome
     // version, and a reader has to be able to tell "not captured" from "the body was empty".
+    // That absence is structural — not an eviction, not a filter, nothing a setting would change.
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...(request.resourceType !== undefined && { resourceType: request.resourceType }),
     ...(request.requestHeaders !== undefined && { requestHeaders: request.requestHeaders }),

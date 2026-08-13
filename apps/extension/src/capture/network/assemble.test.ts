@@ -67,6 +67,20 @@ describe('a request that completes', () => {
     expect(entry?.draft).toHaveProperty('responseBody', RESPONSE_BODY_UNAVAILABLE);
   });
 
+  it('names the layer that produced the entry, on every way of closing one', () => {
+    assembler.begin(opening({ requestId: 'closed' }));
+    assembler.begin(opening({ requestId: 'broken' }));
+    assembler.begin(opening({ requestId: 'stalled' }));
+
+    const closed = assembler.complete({ requestId: 'closed', statusCode: 200, timeStamp: START });
+    const broken = assembler.fail({ requestId: 'broken', error: 'net::ERR', timeStamp: START });
+    const [stalled] = assembler.sweep(START + PENDING_TIMEOUT_MS);
+
+    for (const entry of [closed, broken, stalled]) {
+      expect(entry?.draft).toHaveProperty('provenance', 'webRequest');
+    }
+  });
+
   it('is forgotten once closed, so a duplicate closing event yields nothing', () => {
     assembler.begin(opening());
     assembler.complete({ requestId: '1', statusCode: 200, timeStamp: START + 10 });

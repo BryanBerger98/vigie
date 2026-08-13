@@ -1,0 +1,62 @@
+---
+type: spike
+status: resolved
+depends_on:
+  - cdp-mv3-feasibility
+---
+
+# Spike: cdp-optin-usability
+
+## Question
+
+Une session `chrome.debugger` permanente sur les onglets des domaines surveillés est-elle vivable au quotidien pour la cible de Vigie, sachant qu'elle rend le bandeau du navigateur permanent et qu'elle expose la couche à l'éjection par DevTools ?
+
+## Decision
+
+La couche CDP est-elle permanente — un pair de `capture/network/` attaché au démarrage du service worker —, bornée par l'utilisateur comme l'enregistrement vidéo, ou abandonnée ? Le choix décide de la forme de `capture/cdp/`, de l'affordance que la couche doit exposer dans l'interface (`aidd_docs/memory/design.md:22`), et du sort de deux affirmations de la mémoire projet, aujourd'hui posées sans mesure.
+
+## Bounds
+
+- Evidence needed :
+  - Existence et forme réelle du bandeau : texte, emplacement, présence d'un bouton d'annulation, persistance dans le temps, comportement quand plusieurs onglets sont attachés simultanément.
+  - Vérification de `aidd_docs/memory/architecture.md:82` : l'ouverture de DevTools sur un onglet attaché éjecte-t-elle bien la session, et avec quelle `DetachReason` exactement ?
+  - Réciproque : quand la session est attachée en premier, DevTools s'ouvre-t-il quand même, et que voit l'utilisateur ?
+  - Reprise après éjection : un ré-attachement automatique est-il possible à la fermeture de DevTools, ou faut-il un geste ?
+  - Effet de bord du verdict précédent : une session éjectée ne maintient plus le service worker en vie. La couche CDP éjectée entraîne-t-elle une terminaison du service worker qui affecte les autres couches ?
+- Stop when : verdict tranché sur prototype jetable entre les trois branches — permanente, bornée par l'utilisateur, ou abandonnée.
+- Hors périmètre : dédoublonnage avec `chrome.webRequest` et coût de stockage des corps de réponse. Les deux autres questions laissées ouvertes par `cdp-mv3-feasibility`, indépendantes de celle-ci.
+
+## Investigation
+
+Les journaux `journal-*.jsonl` cités ci-dessous sont ceux d'un prototype jetable, hors dépôt et non conservés.
+Les horodatages et les lignes décisives sont recopiés dans la colonne des résultats.
+
+| Attempt | Evidence | Result |
+| ------- | -------- | ------ |
+| Lecture de la référence `chrome.debugger` | [chrome.debugger API reference](https://developer.chrome.com/docs/extensions/reference/api/debugger) | La page ne dit **rien** du bandeau. Sur l'éjection, une seule phrase : `onDetach` est « Fired when browser terminates debugging session for the tab. This happens when either the tab is being closed or Chrome DevTools is being invoked for the attached tab. » Le principe de l'éjection par DevTools est donc documenté, mais la `DetachReason` correspondante ne l'est pas. |
+| Lecture du papier académique sur l'abus de CDP par les extensions | [Chrowned by an Extension: Abusing the Chrome DevTools Protocol](https://dspace.networks.imdea.org/bitstream/handle/20.500.12761/1704/eurosp2023-final51.pdf), EuroS&P 2023, §2.3 | Cité mot pour mot : « Chromium notifies users by rendering an infobar **across all open browser tabs** […] This notification will not go away until there are no attached debuggers left. Optionally, a user can click on the cancel button to **force all debuggers from an extension to be detached** from their respective targets. » Note 8 de la même page : le bandeau est supprimé par le drapeau `--silent-debugger-extension-api`. Source de 2023, à recouper avec le code actuel. |
+| Lecture du code d'attachement dans Chromium, branche `main` | `chrome/browser/extensions/api/debugger/debugger_api.cc`, récupéré via `chromium.googlesource.com` | Trois constats. **1.** `ExtensionDevToolsClientHost::Attach()` n'affiche le bandeau que si `!suppress_warning`, et `suppress_warning` est vrai pour `--silent-debugger-extension-api` **ou** pour `Manifest::IsPolicyLocation(extension_->location())` — une extension déployée par politique d'entreprise n'affiche aucun bandeau (l. 581-592). **2.** `WarningUiDestroyed()` pose `detach_reason_ = kCanceledByUser` puis `Close()` : `canceled_by_user` est la raison de l'**annulation du bandeau** (l. 694-699). **3.** `AgentHostClosed()` émet l'événement sans toucher `detach_reason_`, qui vaut `kTargetClosed` par défaut (l. 531-532, 659-665). L'ouverture de DevTools passant par ce chemin, la raison attendue est `target_closed`, pas `canceled_by_user`. |
+| Lecture du code du bandeau dans Chromium, branche `main` | `extension_dev_tools_infobar_delegate.cc` et `.h`, plus `IDS_DEV_TOOLS_INFOBAR_LABEL` dans `chrome/app/generated_resources.grd` | Texte exact : `"<nom de l'extension>" started debugging this browser`, avec un unique bouton libellé `Cancel` (`GetButtons()` renvoie `BUTTON_OK`, `GetButtonLabel()` renvoie `IDS_APP_CANCEL`). Le registre des delegates est un `map<ExtensionId, …>` : **un seul bandeau par extension**, quel que soit le nombre d'onglets attachés (l. 33-37, 48-53). `GlobalConfirmInfoBar::Show` le rend global à toutes les fenêtres. `ShouldExpire()` renvoie `false` : il ne disparaît pas à la navigation. `kAutoCloseDelay = base::Seconds(5)` : après le détachement du dernier client, il se ferme seul au bout de 5 s. |
+| Prototype jetable, scénario `devtools-first` — DevTools déjà ouvert quand l'extension s'attache | Build de `apps/extension/.output/chrome-mv3` recopié, `debugger` et `tabs` passés en permissions requises, sonde ajoutée à `background.js` ; Chrome for Testing 151.0.7922.34 lancé avec `--auto-open-devtools-for-tabs`. Journal `journal-s1-devtools-first.jsonl` | `attach-ok` à 6 ms, `Network.enable` accepté à 8 ms, `Network.responseReceived` reçu toutes les ~5 s pendant plus de 64 s. Les relevés à 15, 30, 45 et 60 s voient l'onglet cible `attached: true` à côté de deux cibles `devtools://devtools/bundled/devtools_app.html`. **Aucun `detach`.** DevTools ouvert n'empêche pas `attach()` et ne coupe pas la session. |
+| Prototype jetable, scénario `attach-first` au repos — 2 onglets attachés, 16 min sans intervention | Journal `journal-s2-idle.jsonl`, 482 lignes, de 09:09:08 à 09:25:02 | `attach-ok` sur les deux onglets en moins de 100 ms. Tous les relevés jusqu'à 240 s donnent les deux onglets `attached: true`, et les événements CDP continuent d'arriver au-delà de 950 s : le service worker n'est jamais mort. Aucun `detach`, aucun `attach-fail`. |
+| Vérification visuelle du bandeau sous Chrome for Testing | Capture de la fenêtre à deux onglets attachés, build 151.0.7922.34 | Le seul bandeau visible est celui de Chrome for Testing (`Chrome for Testing v151.0.7922.34 is only for automated testing`), présent au lancement indépendamment de toute session attachée. **Le bandeau du debugger n'apparaît pas.** Aucune des deux conditions de suppression de `debugger_api.cc:581-584` n'est réunie ici : l'extension est chargée dépaquetée, pas par politique, et `--silent-debugger-extension-api` n'est pas passé. Hypothèse retenue et à vérifier : Chrome n'affiche qu'un infobar à la fois et celui de Chrome for Testing masque l'autre. Toute observation du bandeau faite sur ce build est donc sans valeur. |
+| Prototype jetable sur Chrome de série, clic sur le bouton du bandeau | Chrome 151.0.7922.76, profil neuf, **aucun drapeau** de ligne de commande susceptible de déclencher un bandeau concurrent. `--load-extension` étant ignoré par Chrome de série depuis la 137, l'extension est installée à la main en non empaquetée. Journal `journal-s5-stock-cancel.jsonl`, plus une capture de la fenêtre | Attachement des deux onglets à 10:03:13. Le bandeau du debugger apparaît sous la barre d'outils, texte `"Vigie" started debugging this browser` et bouton bleu `Cancel` unique — conforme au mot près à `IDS_DEV_TOOLS_INFOBAR_LABEL`, et absent du même scénario sous Chrome for Testing. **Le clic détache les deux onglets en 2 ms d'écart, avec `reason: "canceled_by_user"`** : un seul bouton coupe toute la couche, pas seulement l'onglet actif. La sonde se ré-attache **1 s plus tard sans aucun geste**, le bandeau revient, un second clic à 10:03:37 produit exactement le même cycle. Chrome ne garde aucune mémoire du refus. Le service worker survit au détachement : ses minuteries continuent de s'exécuter alors que plus aucun keepalive n'est actif. Vérification complémentaire dans un onglet neuf ouvert sur un site sans rapport : **le bandeau y apparaît aussi**, ce qui confirme le caractère global annoncé par `GlobalConfirmInfoBar::Show`. |
+| Prototype jetable, cycle DevTools sur session déjà attachée | Sonde instrumentée émettant une ligne à chaque changement d'état (`chrome.debugger.getTargets()` échantillonné toutes les 2 s). Journal `journal-s3-devtools-cycle.jsonl` | Attachement des deux onglets à 09:30:29. Ouverture de DevTools à 09:31:31 : `devtools` passe de 0 à 1, les deux onglets restent `attached: true`. Fermeture à 09:31:39 : retour à 0, toujours `attached: true`. **Aucun `detach` sur le cycle complet**, et le trafic CDP reprend derrière. La réciproque de `architecture.md:82` est fausse elle aussi : DevTools et `chrome.debugger` coexistent dans les deux ordres d'arrivée. |
+
+## Outcome
+
+- Result : **la couche CDP est vivable, mais pas en permanence — elle sera bornée par l'utilisateur.** L'objection technique qui la menaçait n'existe pas : DevTools et `chrome.debugger` coexistent quel que soit l'ordre d'arrivée, le service worker survit au détachement, et le ré-attachement est immédiat. Tout le coût tient dans le bandeau, et il est plus lourd qu'annoncé : global à tous les onglets y compris ceux sans rapport avec la capture, et impossible à faire disparaître puisque `Cancel` détache tout mais que Chrome ne mémorise pas le refus. Une session permanente condamnerait donc l'utilisateur à un bandeau perpétuel sur l'ensemble de sa navigation, sans recours autre que la désinstallation. Une session bornée rend au contraire le bandeau lisible : il dure ce que dure la capture et la signale.
+- Confidence : haute. Chaque constat repose sur un journal horodaté du prototype **et** sur une lecture concordante du code Chromium ; les deux affirmations de la mémoire projet ont été testées séparément plutôt que déduites l'une de l'autre. Le seul écart entre code et observation — bandeau absent sous Chrome for Testing — a été isolé et reproduit sur Chrome de série.
+- Remaining uncertainty :
+  - Le masquage du bandeau du debugger par celui de Chrome for Testing reste une hypothèse : les deux manches diffèrent aussi par le mode d'installation. Conséquence pratique quelle qu'en soit la cause : la suite e2e ne verra jamais ce bandeau et ne peut pas servir de garde-fou dessus.
+  - La suppression du bandeau pour une extension installée par politique d'entreprise est lue dans le code, jamais mesurée : aucun déploiement administré n'a été testé.
+  - Mesures faites sur macOS et Chrome 151 seulement, avec un seul domaine CDP activé (`Network`). Un domaine que DevTools revendiquerait plus jalousement pourrait se comporter autrement.
+  - La fenêtre d'environ 1 s entre le détachement et le ré-attachement n'a pas été instrumentée : le volume de trafic perdu pendant une coupure n'est pas connu.
+
+## Follow-up
+
+- **Corriger `aidd_docs/memory/architecture.md`.** La ligne 71 est fausse et doit disparaître : DevTools n'éjecte pas la session, et `canceled_by_user` désigne l'annulation du bandeau, pas l'ouverture de DevTools. La ligne 72 est vraie mais incomplète : le bandeau est global à tous les onglets, il ne se referme pas durablement, et il est supprimé pour une installation par politique d'entreprise.
+- **Révision d'une conclusion de [[cdp-mv3-feasibility]].** Son Follow-up posait « pas de session bornée par l'utilisateur ». La décision d'aujourd'hui l'infirme sur ce point précis, sans toucher à son verdict principal sur le keepalive, qui reste vérifié. La formulation « opt-in, on demand » de `architecture.md:62` et `:67` redevient donc exacte.
+- **Règle de conception imposée par la mesure : ne jamais se ré-attacher après un `canceled_by_user`.** Le prototype l'a fait et transforme le bouton du bandeau en combat contre l'extension. Un `canceled_by_user` doit être traité comme un arrêt demandé par l'utilisateur et remonter à l'interface.
+- **Forme retenue pour `capture/cdp/`** : un cycle démarrage/arrêt explicite, sur le modèle de l'enregistrement vidéo, avec l'affordance correspondante à spécifier dans `aidd_docs/memory/design.md:22`.
+- Les deux autres questions laissées ouvertes par [[cdp-mv3-feasibility]] restent ouvertes.

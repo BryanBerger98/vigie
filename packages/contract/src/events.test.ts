@@ -7,8 +7,10 @@ import {
   isNetworkEntry,
   RESPONSE_BODY_UNAVAILABLE,
   type ConsoleEntry,
+  type EntryProvenance,
   type ErrorEntry,
   type NetworkEntry,
+  type ResponseBodyState,
 } from './events';
 
 const network: NetworkEntry = {
@@ -26,6 +28,7 @@ const network: NetworkEntry = {
   requestHeaders: [{ name: 'Cookie', value: 'session=abc' }],
   responseHeaders: [{ name: 'Set-Cookie', value: 'session=def' }],
   requestBody: '{"id":1}',
+  provenance: 'webRequest',
   responseBody: RESPONSE_BODY_UNAVAILABLE,
 };
 
@@ -65,10 +68,33 @@ describe('isNetworkEntry', () => {
       method: 'GET',
       url: 'https://app.example.com/',
       outcome: 'pending',
+      provenance: 'webRequest',
       responseBody: RESPONSE_BODY_UNAVAILABLE,
     };
     expect(isNetworkEntry(minimal)).toBe(true);
   });
+
+  it.each<EntryProvenance>(['webRequest', 'cdp'])('accepts an entry from the %s layer', (layer) => {
+    expect(isNetworkEntry({ ...network, provenance: layer })).toBe(true);
+  });
+
+  it.each<ResponseBodyState>([
+    'evicted',
+    'unavailable',
+    'filtered',
+    'out-of-session',
+    'unfinished',
+  ])('accepts %s, which carries no body text', (state) => {
+    expect(isNetworkEntry({ ...network, responseBody: state })).toBe(true);
+  });
+
+  it.each<ResponseBodyState>(['captured', 'truncated'])(
+    'accepts %s, with or without the text it allows',
+    (state) => {
+      expect(isNetworkEntry({ ...network, responseBody: state })).toBe(true);
+      expect(isNetworkEntry({ ...network, responseBody: state, responseBodyText: '{}' })).toBe(true);
+    },
+  );
 
   it.each([
     ['a missing required field', { ...network, url: undefined }],
@@ -76,7 +102,12 @@ describe('isNetworkEntry', () => {
     ['a non-finite timestamp', { ...network, timestamp: Number.NaN }],
     ['a string tab id', { ...network, tabId: '42' }],
     ['an unknown outcome', { ...network, outcome: 'aborted' }],
-    ['a response body claimed as available', { ...network, responseBody: 'available' }],
+    ['a missing provenance', { ...network, provenance: undefined }],
+    ['an unknown provenance', { ...network, provenance: 'devtools' }],
+    ['a response body state the contract does not define', { ...network, responseBody: 'available' }],
+    ['a missing response body state', { ...network, responseBody: undefined }],
+    ['a body text on a state that denies one', { ...network, responseBodyText: '{"id":1}' }],
+    ['a non-string body text', { ...network, responseBody: 'captured', responseBodyText: 42 }],
     ['a malformed header list', { ...network, requestHeaders: [{ name: 'Cookie' }] }],
     ['a wrongly typed optional field', { ...network, statusCode: '500' }],
     ['another kind', consoleEntry],

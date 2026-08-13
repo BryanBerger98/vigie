@@ -6,13 +6,17 @@ import { RETENTION_MS } from '@/storage/prune';
 import {
   DEFAULT_EXPORT_DEPTH_MINUTES,
   IDLE_FEEDBACK,
+  deepLayerView,
   depthAvailability,
   downloadAcknowledgement,
   exportFailure,
+  interruptionNotice,
+  isDeepLayerFailure,
   resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
   workingFeedback,
+  type DeepLayerFacts,
   type PopupFacts,
 } from './state';
 
@@ -221,7 +225,7 @@ describe('downloadAcknowledgement', () => {
 
   it('summarises the gaps the report declares', () => {
     expect(downloadAcknowledgement(bundle(), FILENAME, { ok: true }).detail).toContain(
-      'Declared in the report: no response bodies.',
+      'Declared in the report: no response bodies without the deep layer.',
     );
   });
 
@@ -264,5 +268,119 @@ describe('the states that surround an acknowledgement', () => {
 
     expect(view.kind).toBe('failed');
     expect(view.detail).toBe('the worker never answered');
+  });
+});
+
+/**
+ * The deep layer's four states, asserted on what each one tells the user.
+ *
+ * The layer is the one capability that costs something visible — a permission, and Chrome's banner
+ * on every tab of the profile — so a state that renders without naming that price is the failure
+ * here, not a wrong discriminant. Two states are especially close and must not read alike: `stopped`
+ * is a layer nobody armed, `canceled` is a layer the user refused, and telling them apart is what
+ * keeps the extension from re-attaching over a click that asked it to stop.
+ */
+
+function deepLayerFacts(overrides: Partial<DeepLayerFacts> = {}): DeepLayerFacts {
+  return {
+    support: { supported: true, chromeMajorVersion: 151 },
+    armed: false,
+    canceledByUser: false,
+    attachedTabs: 0,
+    ...overrides,
+  };
+}
+
+describe('deepLayerView', () => {
+  it('names the Chrome the layer needs, and offers nothing to click, below the threshold', () => {
+    const view = deepLayerView(
+      deepLayerFacts({
+        support: { supported: false, reason: 'below-keepalive', chromeMajorVersion: 116 },
+      }),
+    );
+
+    expect(view.kind).toBe('unavailable');
+    expect(view.detail).toContain('116');
+    expect(view.detail).toContain('118');
+    expect(view.action).toBeNull();
+  });
+
+  it('says the rest of the capture keeps working when the browser is not a Chrome', () => {
+    const view = deepLayerView(
+      deepLayerFacts({
+        support: { supported: false, reason: 'unknown-browser', chromeMajorVersion: null },
+      }),
+    );
+
+    expect(view.kind).toBe('unavailable');
+    expect(view.detail).toContain('Everything else keeps working');
+    expect(view.action).toBeNull();
+  });
+
+  it('states the price before it is paid rather than after', () => {
+    const view = deepLayerView(deepLayerFacts());
+
+    expect(view.kind).toBe('stopped');
+    expect(view.detail).toContain('banner');
+    expect(view.action).toEqual({ label: 'Start deep capture', intent: 'start' });
+  });
+
+  it('counts the tabs it is running on, in the singular when there is one', () => {
+    const running = deepLayerView(deepLayerFacts({ armed: true, attachedTabs: 3 }));
+    const alone = deepLayerView(deepLayerFacts({ armed: true, attachedTabs: 1 }));
+
+    expect(running.kind).toBe('active');
+    expect(running.detail).toContain('3 watched tabs');
+    expect(running.action).toEqual({ label: 'Stop deep capture', intent: 'stop' });
+    expect(alone.detail).toContain('1 watched tab.');
+  });
+
+  it('reads as a refusal rather than as an off switch after a cancellation', () => {
+    const canceled = deepLayerView(deepLayerFacts({ armed: true, canceledByUser: true }));
+    const stopped = deepLayerView(deepLayerFacts());
+
+    expect(canceled.kind).toBe('canceled');
+    expect(canceled.label).not.toBe(stopped.label);
+    expect(canceled.detail).toContain('Nothing will re-attach on its own');
+    // The mark blocks the extension, never the user: the way back is one click, from here.
+    expect(canceled.action).toEqual({ label: 'Start deep capture', intent: 'start' });
+  });
+});
+
+describe('interruptionNotice', () => {
+  it('says nothing when nothing was interrupted, which is every ordinary opening', () => {
+    expect(interruptionNotice(false)).toBeNull();
+  });
+
+  it('says the two things it owes: the update, and the capture it stopped', () => {
+    const notice = interruptionNotice(true);
+
+    expect(notice?.label).toBe('Capture interrupted');
+    expect(notice?.detail).toContain('updated');
+    expect(notice?.detail).toContain('stopped the capture');
+  });
+
+  it('claims nothing about what happens next: the deep layer block below answers that', () => {
+    const notice = interruptionNotice(true);
+
+    for (const promise of ['resum', 're-attach', 'restart', 'again']) {
+      expect(notice?.detail.toLowerCase()).not.toContain(promise);
+    }
+  });
+});
+
+describe('isDeepLayerFailure', () => {
+  it('reads the worker\'s error answer, which is what the click has to surface', () => {
+    expect(isDeepLayerFailure({ error: 'Another debugger is already attached' })).toBe(true);
+  });
+
+  it('leaves the success answer alone: the session state is not a failure', () => {
+    expect(isDeepLayerFailure({ armed: true, attachedTabs: [7], inFlight: {} })).toBe(false);
+  });
+
+  it('holds against the answers a dead worker gives, none of which carry an error string', () => {
+    for (const answer of [undefined, null, 'error', 42, { error: 500 }]) {
+      expect(isDeepLayerFailure(answer)).toBe(false);
+    }
   });
 });

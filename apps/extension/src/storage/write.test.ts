@@ -45,6 +45,7 @@ function draft(overrides: Partial<NetworkEntry> = {}): EntryDraft {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   } satisfies NetworkEntry;

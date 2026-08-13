@@ -43,6 +43,12 @@ export function buildVariantPath(name: string): string {
 /**
  * Copies the shipped build to `path` and makes its host permission required rather than optional.
  * Call it from `beforeAll`; call `removeBuildVariant` from `afterAll`.
+ *
+ * The deep layer needs no swap of its own. `debugger` is a required permission in the shipped
+ * manifest, because Chrome refuses it as an optional one — measured on Chromium 151.0.7922.34,
+ * `permissions.request` answers "Only permissions specified in the manifest may be requested" and
+ * `permissions.getAll()` never lists it (`apps/extension/wxt.config.ts:37`). The variants that used
+ * to force it here now run on the same permission set as the users.
  */
 export async function createBuildVariant(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true });
@@ -52,6 +58,7 @@ export async function createBuildVariant(path: string): Promise<void> {
   const manifestPath = join(path, 'manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
   manifest.host_permissions = ['*://*/*'];
+
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 

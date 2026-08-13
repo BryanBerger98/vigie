@@ -1,5 +1,6 @@
 import type { NetworkEntry } from '@vigie/contract';
-import { RESPONSE_BODY_UNAVAILABLE } from '@vigie/contract';
+import { RESPONSE_BODY_UNAVAILABLE, isNetworkEntry } from '@vigie/contract';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CAPTURE_DATABASE_NAME, CaptureDatabase, db, setDatabase } from './db';
@@ -29,6 +30,7 @@ function entry(overrides: Partial<NetworkEntry>): NetworkEntry {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   };
@@ -46,10 +48,10 @@ afterEach(async () => {
 });
 
 describe('the capture database', () => {
-  it('opens at version 1', async () => {
+  it('opens at the latest version', async () => {
     await database.open();
 
-    expect(database.verno).toBe(1);
+    expect(database.verno).toBe(2);
   });
 
   it('hands the same instance back rather than opening a second connection', () => {
@@ -66,6 +68,67 @@ describe('the capture database', () => {
 
     expect(typeof id).toBe('number');
     expect((await database.entries.get(id as never))?.id).toBe(id);
+  });
+});
+
+/**
+ * A migration is only worth asserting against data an older build wrote, so this opens a database
+ * holding nothing but the version 1 block, fills it, closes it, and hands the same name to the
+ * current schema. That is the upgrade an installed extension performs.
+ */
+describe('the upgrade from version 1', () => {
+  const V1_SCHEMA = { entries: '++id, timestamp, [tabId+timestamp], [domain+timestamp]' };
+
+  async function writeAtVersionOne(name: string, rows: Record<string, unknown>[]): Promise<void> {
+    const legacy = new Dexie(name);
+    legacy.version(1).stores(V1_SCHEMA);
+    await legacy.table('entries').bulkAdd(rows);
+    legacy.close();
+  }
+
+  it('states what produced the entries it inherits, and leaves the other kinds alone', async () => {
+    databases += 1;
+    const name = `vigie-db-${databases}`;
+    await writeAtVersionOne(name, [
+      {
+        kind: 'network',
+        timestamp: NOW,
+        tabId: 7,
+        domain: 'example.com',
+        requestId: 'written-at-v1',
+        method: 'GET',
+        url: 'https://example.com/api',
+        outcome: 'completed',
+        statusCode: 200,
+        responseBody: 'unavailable',
+      },
+      {
+        kind: 'console',
+        timestamp: NOW + 1,
+        tabId: 7,
+        domain: 'example.com',
+        level: 'warn',
+        text: 'retrying',
+        truncated: false,
+      },
+    ]);
+
+    const upgraded = new CaptureDatabase(name);
+    await upgraded.open();
+
+    expect(upgraded.verno).toBe(2);
+    const rows = await upgraded.entries.toArray();
+    expect(rows).toHaveLength(2);
+
+    const network = rows.find((row) => row.kind === 'network') as NetworkEntry;
+    expect(network.requestId).toBe('written-at-v1');
+    expect(network.provenance).toBe('webRequest');
+    expect(network.responseBody).toBe(RESPONSE_BODY_UNAVAILABLE);
+    expect(isNetworkEntry(network)).toBe(true);
+
+    expect(rows.find((row) => row.kind === 'console')).not.toHaveProperty('provenance');
+
+    await upgraded.delete();
   });
 });
 

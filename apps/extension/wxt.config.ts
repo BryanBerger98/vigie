@@ -33,7 +33,26 @@ export default defineConfig({
     // changes nothing in the output — it is written down because this list is where someone
     // auditing what Vigie asks the browser for comes to read, and an invisible permission is one
     // they would have to reverse-engineer from a build. It shows no warning at install.
-    permissions: ['storage', 'webRequest', 'scripting', 'activeTab', 'sidePanel'],
+    //
+    // This array does not grow once a version is published. Chrome disables an extension until
+    // the user accepts a newly added permission that carries a warning, and a disabled extension
+    // is a capture the user has to restart by hand — the one thing the resume path is meant to
+    // spare them. New capabilities go to `optional_permissions` instead, granted at use time:
+    // `offscreen` and `tabCapture` arrive that way.
+    //
+    // `debugger` cannot, and that is the browser's rule rather than a preference. It shipped here
+    // under `optional_permissions` until Chrome was asked for it inside a real click: Chromium
+    // 151.0.7922.34 answers "Only permissions specified in the manifest may be requested", and
+    // `permissions.getAll()` never lists it — the key is dropped at load while
+    // `runtime.getManifest()` goes on reporting it, so nothing signals the gap. A control
+    // permission declared in the same array, `downloads`, opens its confirmation bubble on the
+    // same click. The earlier measurement that let the optional declaration stand asked without a
+    // user gesture and never reached the manifest check.
+    //
+    // The price is paid at install: the deep layer's warning is shown to every user, including
+    // those who never arm it, and the layer is armed by an explicit gesture in the popup rather
+    // than by the permission prompt Chrome will not open.
+    permissions: ['storage', 'webRequest', 'scripting', 'activeTab', 'sidePanel', 'debugger'],
     // No static `host_permissions`: capture scope is granted domain by domain, at the moment
     // the user adds one. The browser then enforces the scope the product claims, instead of
     // our code alone — and the Chrome Web Store "Minimum Permission" clause asks for the same.

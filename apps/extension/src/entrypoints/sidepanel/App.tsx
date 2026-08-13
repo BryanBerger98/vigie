@@ -1,3 +1,4 @@
+import { takeCaptureInterrupted } from '@/capture/cdp/session-state';
 import { ConsentRequired } from '@/consent/ConsentRequired';
 import {
   isCapturePermitted,
@@ -5,10 +6,12 @@ import {
   readConsent,
   type ConsentState,
 } from '@/consent/state';
+import { InterruptionNotice } from '@/entrypoints/popup/InterruptionNotice';
 import { ScopeStatus } from '@/entrypoints/popup/ScopeStatus';
 import { TabContextLine } from '@/entrypoints/popup/TabContextLine';
 import {
   MS_PER_MINUTE,
+  interruptionNotice,
   isShrunk,
   scopeStatus,
   tabContextLine,
@@ -94,12 +97,26 @@ export default function App() {
   const [scope, setScope] = useState<Scope | null>(null);
   const [storage, setStorage] = useState<StorageState>(EMPTY_STORAGE_STATE);
   const [thread, setThread] = useState<TabWindow | null>(null);
+  const [interrupted, setInterrupted] = useState(false);
+  const noticeTaken = useRef(false);
 
   // Answered in another tab, so the panel follows it rather than reading it once.
   useEffect(() => {
     void readConsent().then(setConsent);
     return onConsentChanged(setConsent);
   }, []);
+
+  // The interruption mark, read once and consumed by the reading. Same rule and same reasons as the
+  // popup, which `popup/App.tsx:155` carries: gated on the agreement because reading clears it, and
+  // guarded by a ref because `React.StrictMode` mounts every effect twice. Whichever of the two
+  // surfaces opens first is the one that shows the notice; both word it with the same component.
+  useEffect(() => {
+    if (consent === null || !isCapturePermitted(consent)) return;
+    if (noticeTaken.current) return;
+
+    noticeTaken.current = true;
+    void takeCaptureInterrupted().then(setInterrupted);
+  }, [consent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +215,7 @@ export default function App() {
         };
 
   const status = facts ? scopeStatus(facts) : null;
+  const notice = interruptionNotice(interrupted);
   // The two states in which something is being captured. In the other two the thread is absent
   // rather than empty, so the surface says why instead of showing nothing (`phase-10.md:132`).
   const readable = status !== null && (status.kind === 'capturing' || status.kind === 'degraded');
@@ -221,6 +239,10 @@ export default function App() {
     >
       <header className="flex flex-col gap-2">
         <h1 className="text-sm font-semibold">Vigie</h1>
+
+        {/* Above the scope, as in the popup: it covers the whole capture window while everything
+            under it covers this tab. */}
+        {notice ? <InterruptionNotice notice={notice} /> : null}
 
         {status ? (
           <ScopeStatus status={status} onWatch={watchDomainFromPanel} />

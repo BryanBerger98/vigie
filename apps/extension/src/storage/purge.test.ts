@@ -40,6 +40,7 @@ function entry(overrides: Partial<NetworkEntry> = {}): NetworkEntry {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   };

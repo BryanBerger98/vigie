@@ -148,6 +148,9 @@ test('the popup shows the gate instead of itself while the agreement is missing'
   await expect(popup.getByTestId('scope-status')).toHaveCount(0);
   await expect(popup.getByTestId('export-run')).toHaveCount(0);
   await expect(popup.getByTestId('open-sidepanel')).toHaveCount(0);
+  // The deep layer least of all: it asks for a permission and puts a banner on every tab of the
+  // profile, and offering that before the disclosure is answered would be the gate's exact inverse.
+  await expect(popup.getByTestId('deep-layer')).toHaveCount(0);
 
   // The header is the exception, and deliberately so: someone landing on the disclosure does not
   // yet know what this window is, which is the moment the brand and the title matter most. Its

@@ -81,7 +81,9 @@ test('a visit to a watched domain lands in the store', async ({ context, extensi
     method: 'GET',
     outcome: 'completed',
     statusCode: 200,
-    // Stated, never omitted: `webRequest` exposes no response body in any Chrome version.
+    // The shallow layer wrote it, and it exposes no response body in any Chrome version. Both are
+    // stated on the entry, never omitted.
+    provenance: 'webRequest',
     responseBody: 'unavailable',
   });
   expect(document?.tabId).toBeGreaterThanOrEqual(0);
@@ -172,6 +174,7 @@ test('an entry older than the rolling hour is gone at the next write', async ({
     url: `${site.origin}/ancient`,
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: 'unavailable',
   });
 

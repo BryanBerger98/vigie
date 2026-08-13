@@ -56,14 +56,12 @@ describe('gaps', () => {
     });
   });
 
-  it('declares the two gaps that hold for every report, whatever was captured', () => {
-    expect(STRUCTURAL_GAPS).toEqual([
-      'response-bodies-unavailable',
-      'browser-messages-out-of-reach',
-    ]);
+  it('declares the one gap that holds for every report, whatever was captured', () => {
+    expect(STRUCTURAL_GAPS).toEqual(['browser-messages-out-of-reach']);
   });
 
-  it('leaves the two conditional gaps out of the structural set', () => {
+  it('leaves the three conditional gaps out of the structural set', () => {
+    expect(STRUCTURAL_GAPS).not.toContain('response-bodies-unavailable');
     expect(STRUCTURAL_GAPS).not.toContain('capture-started-after-page-load');
     expect(STRUCTURAL_GAPS).not.toContain('window-shrunk-by-quota');
   });

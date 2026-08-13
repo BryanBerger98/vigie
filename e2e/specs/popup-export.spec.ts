@@ -115,6 +115,7 @@ function seedPast(options: Page, tabId: number, ageMs: number, path: string): Pr
     outcome: 'completed',
     statusCode: 200,
     resourceType: 'xmlhttprequest',
+    provenance: 'webRequest',
     responseBody: 'unavailable',
   });
 }

@@ -30,6 +30,7 @@ function entry(minutesAgo: number, overrides: Partial<NetworkEntry> = {}): Netwo
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   };

@@ -19,7 +19,8 @@ The visual language: the design system, tokens, and UI conventions. What it look
 
 - The states that actually matter here are capture states, not form states: **out of scope** (the current domain is not watched), **capturing context**, **recording** (a screen recording is running), and **degraded** (a capture layer unavailable). Every surface showing capture status renders all four.
 - Out of scope is the state most likely to be misread, because nothing visibly happens either way. It has to be unmistakable, or the user discovers at export time that the past hour was never captured.
-- `chrome.debugger` needs its own visible affordance: it is opt-in and cannot coexist with DevTools (see `architecture.md`). The UI states that conflict rather than silently losing the layer.
+- `chrome.debugger` needs its own visible affordance: it is opt-in, and while attached Chrome shows its own banner on every tab whose Cancel button stops the layer everywhere at once (see `architecture.md`). The UI states that the layer is running and reflects a `canceled_by_user` stop rather than silently losing the layer. It does coexist with DevTools, in either order — that is not the conflict to surface.
+- An interrupted capture is announced, never acted upon. When the service worker comes back from an extension update it re-attaches on its own, so the surface says the extension was updated and the capture interrupted — and offers nothing to click. It is a notice, not a prompt: any button here would ask the user to redo what the boot path already did. See `architecture.md` and `aidd_docs/backlog/tasks/capture-resume-notice.md`.
 - The consent screen is a first-run blocking surface, not a dismissible banner. See `deployment.md` for why.
 
 ## Accessibility

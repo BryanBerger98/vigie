@@ -264,6 +264,7 @@ test('the surface reads, and never writes', async ({ context, extensionId }) => 
     outcome: 'completed',
     statusCode: 200,
     resourceType: 'xmlhttprequest',
+    provenance: 'webRequest',
     responseBody: 'unavailable',
   });
 

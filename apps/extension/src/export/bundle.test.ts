@@ -34,6 +34,7 @@ function request(overrides: Partial<NetworkEntry> = {}): NetworkEntry {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   };
@@ -193,14 +194,14 @@ describe('the body of the bundle', () => {
 });
 
 describe('the gaps the bundle declares', () => {
-  it('always carries the two structural ones', async () => {
+  it('always carries the structural one, and the bodies gap while the deep layer is off', async () => {
     await fill([request({ resourceType: 'main_frame' })]);
 
     const bundle = await assembleBundle(bundleRequest(), () => NOW);
 
     expect(bundle.gaps.map((gap) => gap.kind)).toEqual([
-      'response-bodies-unavailable',
       'browser-messages-out-of-reach',
+      'response-bodies-unavailable',
     ]);
     expect(bundle.gaps.every((gap) => gap.statement.length > 0)).toBe(true);
   });

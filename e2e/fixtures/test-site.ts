@@ -72,6 +72,59 @@ const NOISY_SCRIPT_PATH = '/noisy.js';
 /** The page that produces traffic in bulk, so a volume measurement has something to weigh. */
 export const BURST_PATH = '/burst';
 
+/**
+ * A sub-resource the server answers late, and the page that pulls it.
+ *
+ * What a spec needs to hold one request open across a session boundary: the document lands at once
+ * so the tab reaches `complete`, and the fetch is still in flight while the run does something to
+ * the session. The two paths share no prefix on purpose — a `startsWith` router would otherwise
+ * answer the page from the asset's branch.
+ */
+export const SLOW_ASSET_PATH = '/slow-asset';
+export const SLOW_PAGE_PATH = '/held-page';
+
+/**
+ * The page a response-body spec browses, and the three answers it pulls.
+ *
+ * One navigation produces one of each case the body filter has to separate: a JSON fetch small
+ * enough to arrive whole, a JSON fetch several times over the capture ceiling, and a stylesheet —
+ * a resource type the filter refuses outright. The query travels onto all three, so a run's URLs
+ * are nobody else's and a count stays a measurement rather than a sum.
+ */
+export const BODIES_PATH = '/bodies';
+export const SMALL_BODY_PATH = '/body-small';
+export const LARGE_BODY_PATH = '/body-large';
+export const BODY_STYLE_PATH = '/body-style.css';
+
+/** What `/body-small` answers, verbatim, so a spec asserts on the text and not on a shape. */
+export const SMALL_BODY = JSON.stringify({
+  ok: true,
+  items: [
+    { id: 1, label: 'first' },
+    { id: 2, label: 'second' },
+  ],
+});
+
+let largeBody: string | undefined;
+
+/**
+ * What `/body-large` answers: a top-level array several times the 256 kB ceiling.
+ *
+ * An array rather than an object, because the capture backs a truncation up to the last complete
+ * top-level element and only a sequence makes that observable — the cut lands inside a row and has
+ * to come back out at the row before it. Built on first use: every spec imports this module.
+ */
+function largeBodyText(): string {
+  largeBody ??= JSON.stringify(
+    Array.from({ length: 2000 }, (_, index) => ({
+      id: index,
+      label: `row-${index}`,
+      payload: 'x'.repeat(200),
+    })),
+  );
+  return largeBody;
+}
+
 /** How much each burst request carries. See `openBurst`. */
 export type BurstWeight = 'light' | 'heavy';
 
@@ -165,6 +218,18 @@ setTimeout(() => {
 }, 0);
 `;
 
+/** `?a=1` for `/x?a=1`, the empty string otherwise. */
+function queryOf(url: string | undefined): string {
+  const mark = url?.indexOf('?') ?? -1;
+  return mark === -1 ? '' : (url as string).slice(mark);
+}
+
+/** The path alone, so a router can match an extension on a URL that carries a query. */
+function pathOf(url: string | undefined): string {
+  const mark = url?.indexOf('?') ?? -1;
+  return mark === -1 ? (url ?? '') : (url as string).slice(0, mark);
+}
+
 export async function startTestSite(): Promise<TestSite> {
   const server: Server = createServer((request, response) => {
     if (request.url === FAILING_PATH) {
@@ -210,13 +275,60 @@ export async function startTestSite(): Promise<TestSite> {
       response.end(NOISY_SCRIPT);
       return;
     }
-    if (request.url?.endsWith('.js')) {
+    if (request.url?.startsWith(SLOW_PAGE_PATH)) {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(
+        `<!doctype html><title>held</title><script>fetch(${JSON.stringify(
+          `${SLOW_ASSET_PATH}${queryOf(request.url)}`,
+        )});</script><p>held</p>`,
+      );
+      return;
+    }
+    if (request.url?.startsWith(SLOW_ASSET_PATH)) {
+      const delay = Number(new URL(request.url, 'http://localhost').searchParams.get('ms') ?? 1000);
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ ok: true }));
+      }, delay);
+      return;
+    }
+    if (request.url?.startsWith(BODIES_PATH)) {
+      const query = queryOf(request.url);
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(
+        `<!doctype html><title>bodies</title>` +
+          `<link rel="stylesheet" href="${BODY_STYLE_PATH}${query}">` +
+          `<script>fetch(${JSON.stringify(`${SMALL_BODY_PATH}${query}`)});` +
+          `fetch(${JSON.stringify(`${LARGE_BODY_PATH}${query}`)});</script><p>bodies</p>`,
+      );
+      return;
+    }
+    if (request.url?.startsWith(SMALL_BODY_PATH)) {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(SMALL_BODY);
+      return;
+    }
+    if (request.url?.startsWith(LARGE_BODY_PATH)) {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(largeBodyText());
+      return;
+    }
+    if (request.url?.startsWith(BODY_STYLE_PATH)) {
+      response.writeHead(200, { 'content-type': 'text/css' });
+      response.end('p { color: #123456 }');
+      return;
+    }
+    if (pathOf(request.url).endsWith('.js')) {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end('globalThis.__vigieAsset = true;');
       return;
     }
+    // The query travels to the sub-resource, so a spec that wants a visit nobody else produced can
+    // ask for one and count its entries by URL. A visit with no query is unchanged.
     response.writeHead(200, { 'content-type': 'text/html' });
-    response.end('<!doctype html><title>site</title><script src="/asset.js"></script><p>ok</p>');
+    response.end(
+      `<!doctype html><title>site</title><script src="/asset.js${queryOf(request.url)}"></script><p>ok</p>`,
+    );
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

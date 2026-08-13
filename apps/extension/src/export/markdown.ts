@@ -7,6 +7,7 @@ import {
   type NetworkEntry,
   type ReportBundle,
   type ReportGap,
+  type ResponseBodyState,
 } from '@vigie/contract';
 
 import { BAD_STATUS_FROM, countEntries, isAnomalous, type EntryCounts } from './anomalies';
@@ -101,6 +102,23 @@ const AT = '🕑';
 const TOOK = '⏱';
 const OF_TYPE = '📄';
 const LINK = '🔗';
+
+/**
+ * What the meta line says about the response body, one phrase per state.
+ *
+ * The phrase carries the cause, because that is the only thing a reader can act on: an eviction is
+ * a buffer to raise, a filter is a setting to widen, and a structural absence is neither. The entry
+ * is the whole context — nothing here refers to another section or to the gap list.
+ */
+const RESPONSE_BODY_PHRASES: Record<ResponseBodyState, string> = {
+  captured: 'response body captured',
+  truncated: 'response body truncated',
+  evicted: 'response body evicted from the capture buffer',
+  unavailable: 'no response body',
+  filtered: 'response body not requested',
+  'out-of-session': 'response body out of session reach',
+  unfinished: 'response body never delivered',
+};
 
 /** How much of an entry's own text a section title borrows before cutting it. */
 const TITLE_LIMIT = 80;
@@ -244,25 +262,48 @@ function headerDetails(label: string, headers: HttpHeader[] | undefined): string
 }
 
 /**
- * A request body, reformatted only where reformatting is safe.
+ * A payload, reformatted only where reformatting is safe.
  *
  * JSON is reindented: a minified payload is unreadable, and re-indenting it changes nothing a
  * reader relies on. Anything else goes through exactly as it was received — including a payload
  * that looks like JSON and does not parse, which is announced rather than repaired. That
  * malformation may well be the defect the report was cut for.
+ *
+ * `whole` is what separates a payload that failed to parse from one that was never meant to: a body
+ * the capture cut at its ceiling does not parse by construction, and calling that malformed would
+ * point a reader at a defect this tool introduced.
  */
-function requestBodyBlock(body: string | undefined): string[] {
-  if (body === undefined) return [];
-
+function bodyBlock(label: string, body: string, whole: boolean): string[] {
   try {
     const reindented = JSON.stringify(JSON.parse(body) as unknown, null, 2);
-    return details('Request body', fence('json', reindented));
+    return details(label, fence('json', reindented));
   } catch {
-    const summary = /^\s*[[{]/.test(body)
-      ? 'Request body — malformed JSON, left exactly as it was received'
-      : 'Request body';
-    return details(summary, fence('text', body));
+    const malformed = whole && /^\s*[[{]/.test(body);
+    return details(
+      malformed ? `${label} — malformed JSON, left exactly as it was received` : label,
+      fence('text', body),
+    );
   }
+}
+
+function requestBodyBlock(body: string | undefined): string[] {
+  return body === undefined ? [] : bodyBlock('Request body', body, true);
+}
+
+/**
+ * The response body, when the capture reached one.
+ *
+ * Folded, and last in the section: it is the largest thing a request can carry, and a reader
+ * scanning three hundred requests for one of them needs the titles to stay one screen apart. An
+ * empty body renders no block at all — the meta line already says so, and an empty fence is a
+ * question rather than an answer.
+ */
+function responseBodyBlock(entry: NetworkEntry): string[] {
+  const body = entry.responseBodyText;
+  if (body === undefined || body.length === 0) return [];
+
+  const cut = entry.responseBody === 'truncated';
+  return bodyBlock(cut ? 'Response body — cut at the capture ceiling' : 'Response body', body, !cut);
 }
 
 /** The path a request hit. The query string is on the URL line, where length costs nothing. */
@@ -304,10 +345,17 @@ function title(entry: CaptureEntry, parts: (string | undefined)[]): string {
 /**
  * What a section says about itself before its content.
  *
- * The absence of a response body is stated here rather than on a line of its own — it holds for
- * every request in every report this version produces, and a sentence repeated three hundred times
- * stops being read. It stays on every request all the same: an absence stated once in the header
- * and then omitted is an absence a reader concludes from (`prd.md:79`).
+ * The state of the response body is stated here rather than on a line of its own — it holds for
+ * every request of every report, and a sentence repeated three hundred times stops being read. It
+ * stays on every request all the same: an absence stated once in the header and then omitted is an
+ * absence a reader concludes from (`prd.md:79`).
+ *
+ * What it says now depends on the entry. Two layers write into the same report, and a reader has to
+ * be able to explain why this request carries a body and its neighbour does not.
+ *
+ * The layer itself is not named here. It is the mechanism, and the answer to "why does this one
+ * have no body" is the body state — `filtered`, `evicted`, `out-of-session` each say what to do
+ * next, where `webRequest` says only which code path ran.
  */
 function networkMeta(entry: NetworkEntry): string[] {
   return quote([
@@ -316,9 +364,21 @@ function networkMeta(entry: NetworkEntry): string[] {
       `${AT} ${code(iso(entry.timestamp))}`,
       entry.durationMs === undefined ? undefined : `${TOOK} ${code(duration(entry.durationMs))}`,
       entry.resourceType ? `${OF_TYPE} ${code(entry.resourceType)}` : undefined,
-      'no response body',
+      responseBodyPhrase(entry),
     ]),
   ]);
+}
+
+/**
+ * What the meta line says about this entry's body.
+ *
+ * A captured body of zero bytes is the one state the enum cannot express on its own: it is neither
+ * an absence nor something to fold open, and saying "captured" next to no block at all would read
+ * as a rendering that dropped it.
+ */
+function responseBodyPhrase(entry: NetworkEntry): string {
+  if (entry.responseBody === 'captured' && entry.responseBodyText === '') return 'response body empty';
+  return RESPONSE_BODY_PHRASES[entry.responseBody];
 }
 
 /** The meta block of an entry that is nothing but text: when it happened, and whether it is whole. */
@@ -342,6 +402,7 @@ function networkSection(entry: NetworkEntry): string[] {
     headerDetails('Request headers', entry.requestHeaders),
     requestBodyBlock(entry.requestBody),
     headerDetails('Response headers', entry.responseHeaders),
+    responseBodyBlock(entry),
   ]);
 }
 

@@ -28,6 +28,7 @@ function entry(domain: string, minutesAgo: number): NetworkEntry {
     url: `https://${domain}/api`,
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
   };
 }

@@ -12,13 +12,24 @@ import type { WindowBounds } from './slice';
  * gap this version has is therefore written out as a sentence at the head of the report
  * (`prd.md:79`), and the wording lives in the contract so two surfaces cannot drift apart.
  *
- * Two of the four are structural — they hold for every report this version produces — and two are
- * situational. The structural ones come first because they change how the whole body must be read;
+ * One of the four is structural — it holds for every report this version produces — and three are
+ * situational. The structural one comes first because it changes how the whole body must be read;
  * the situational ones follow, because they change only what the window happened to contain.
+ *
+ * The missing response bodies moved from the first group to the second when the deep layer shipped.
+ * They are now a fact about one window: it either holds entries the deep layer wrote, or it does
+ * not, and only the second case is worth a sentence at the head of the report.
  */
 
-/** The `webRequest` resource type of a page's own document request. */
-const MAIN_FRAME = 'main_frame';
+/**
+ * The two names a page's own document request goes by, one per capture layer.
+ *
+ * `webRequest` says `main_frame`; CDP says `Document`, and its vocabulary is kept verbatim rather
+ * than mapped onto the other's — the entry states its provenance, and inventing a correspondence
+ * would put a guess in the data. Both are read here, because the question this answers is about the
+ * page rather than about which layer happened to see it.
+ */
+const DOCUMENT_TYPES = ['main_frame', 'Document'];
 
 export interface GapContext {
   bounds: WindowBounds;
@@ -37,7 +48,25 @@ export interface GapContext {
  * rolling hour, which leaves the reader in exactly the same position and with the same remedy.
  */
 function sawPageLoad(entries: readonly CaptureEntry[]): boolean {
-  return entries.some((entry) => entry.kind === 'network' && entry.resourceType === MAIN_FRAME);
+  return entries.some(
+    (entry) =>
+      entry.kind === 'network' &&
+      entry.resourceType !== undefined &&
+      DOCUMENT_TYPES.includes(entry.resourceType),
+  );
+}
+
+/**
+ * Whether the deep layer wrote anything in this window.
+ *
+ * One entry is enough to answer the question the gap asks — whether a reader may take a missing
+ * body as a fact about the response. The layer covers a whole tab for the length of a session, so a
+ * window holding one of its entries is a window where bodies were being read; the entries that
+ * still have none say why on their own line, which is a better answer than a blanket sentence at
+ * the head of the report.
+ */
+function sawDeepLayer(entries: readonly CaptureEntry[]): boolean {
+  return entries.some((entry) => entry.kind === 'network' && entry.provenance === 'cdp');
 }
 
 /**
@@ -54,6 +83,7 @@ function shrunkInside(bounds: WindowBounds, storage: StorageState): boolean {
 export function declareGaps(context: GapContext): ReportGap[] {
   const gaps = STRUCTURAL_GAPS.map(reportGap);
 
+  if (!sawDeepLayer(context.entries)) gaps.push(reportGap('response-bodies-unavailable'));
   if (!sawPageLoad(context.entries)) gaps.push(reportGap('capture-started-after-page-load'));
   if (shrunkInside(context.bounds, context.storage)) gaps.push(reportGap('window-shrunk-by-quota'));
 

@@ -29,6 +29,7 @@ function request(overrides: Partial<NetworkEntry> = {}): NetworkEntry {
     url: 'https://example.com/api',
     outcome: 'completed',
     statusCode: 200,
+    provenance: 'webRequest',
     responseBody: RESPONSE_BODY_UNAVAILABLE,
     ...overrides,
   };
@@ -39,22 +40,22 @@ function kinds(entries: CaptureEntry[], storage: StorageState = EMPTY_STORAGE_ST
 }
 
 const PAGE_LOAD = request({ requestId: 'document', resourceType: 'main_frame' });
+/** The deep layer's version of the same request: CDP's vocabulary, and a body it did reach. */
+const DEEP_PAGE_LOAD = request({
+  requestId: 'A1B2',
+  resourceType: 'Document',
+  provenance: 'cdp',
+  responseBody: 'captured',
+  responseBodyText: '<!doctype html>',
+});
 
 describe('the gaps every report declares', () => {
-  it('states both structural ones whatever the capture observed', () => {
-    expect(kinds([PAGE_LOAD])).toEqual([
-      'response-bodies-unavailable',
-      'browser-messages-out-of-reach',
-    ]);
+  it('states the structural one whatever the capture observed', () => {
+    expect(kinds([DEEP_PAGE_LOAD])).toEqual(['browser-messages-out-of-reach']);
   });
 
-  it('states them first, because they change how the whole body reads', () => {
-    const [first, second] = kinds([]);
-
-    expect([first, second]).toEqual([
-      'response-bodies-unavailable',
-      'browser-messages-out-of-reach',
-    ]);
+  it('states it first, because it changes how the whole body reads', () => {
+    expect(kinds([])[0]).toBe('browser-messages-out-of-reach');
   });
 
   it('carries the contract wording rather than a sentence of its own', () => {
@@ -63,6 +64,28 @@ describe('the gaps every report declares', () => {
     for (const gap of gaps) {
       expect(gap.statement).toBe(GAP_STATEMENTS[gap.kind]);
     }
+  });
+});
+
+describe('the response bodies the report does not hold', () => {
+  it('is declared on a window the deep layer never covered', () => {
+    expect(kinds([PAGE_LOAD, request({ requestId: 'api' })])).toContain(
+      'response-bodies-unavailable',
+    );
+  });
+
+  it('is declared on an empty window, where nothing says the layer was there', () => {
+    expect(kinds([])).toContain('response-bodies-unavailable');
+  });
+
+  it('is not declared once one entry of the window came from the deep layer', () => {
+    expect(kinds([PAGE_LOAD, DEEP_PAGE_LOAD])).not.toContain('response-bodies-unavailable');
+  });
+
+  it('is not declared for a deep entry that reached no body either', () => {
+    const filtered = request({ requestId: 'font', provenance: 'cdp', responseBody: 'filtered' });
+
+    expect(kinds([filtered])).not.toContain('response-bodies-unavailable');
   });
 });
 
@@ -81,6 +104,10 @@ describe('the page load the capture missed', () => {
     expect(kinds([PAGE_LOAD, request({ requestId: 'api' })])).not.toContain(
       'capture-started-after-page-load',
     );
+  });
+
+  it('recognises the deep layer naming that same request `Document`', () => {
+    expect(kinds([DEEP_PAGE_LOAD])).not.toContain('capture-started-after-page-load');
   });
 });
 
@@ -113,8 +140,8 @@ describe('the four together', () => {
     const storage: StorageState = { ...EMPTY_STORAGE_STATE, shrunkAt: NOW };
 
     expect(kinds([], storage)).toEqual([
-      'response-bodies-unavailable',
       'browser-messages-out-of-reach',
+      'response-bodies-unavailable',
       'capture-started-after-page-load',
       'window-shrunk-by-quota',
     ]);

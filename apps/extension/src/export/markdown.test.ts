@@ -1,4 +1,10 @@
-import type { CaptureEntry, ConsoleEntry, NetworkEntry, ReportBundle } from '@vigie/contract';
+import type {
+  CaptureEntry,
+  ConsoleEntry,
+  NetworkEntry,
+  ReportBundle,
+  ResponseBodyState,
+} from '@vigie/contract';
 import { RESPONSE_BODY_UNAVAILABLE, SCHEMA_VERSION, reportGap } from '@vigie/contract';
 import { describe, expect, it } from 'vitest';
 
@@ -38,7 +44,8 @@ function bundle(overrides: Partial<ReportBundle> = {}): ReportBundle {
       url: 'https://example.com/checkout',
       title: 'Checkout',
     },
-    gaps: [reportGap('response-bodies-unavailable'), reportGap('browser-messages-out-of-reach')],
+    // The order `declareGaps` produces: the structural one, then what this window happened to miss.
+    gaps: [reportGap('browser-messages-out-of-reach'), reportGap('response-bodies-unavailable')],
     entries: [],
     ...overrides,
   };
@@ -62,6 +69,7 @@ const REQUEST: NetworkEntry = {
   ],
   requestBody: '{"sku":"A-1","qty":2}',
   responseHeaders: [{ name: 'content-type', value: 'application/json' }],
+  provenance: 'webRequest',
   responseBody: RESPONSE_BODY_UNAVAILABLE,
 };
 
@@ -105,8 +113,8 @@ describe('a report a reader can act on', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -191,8 +199,8 @@ describe('a window with nothing in it', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -237,7 +245,7 @@ describe('a capture shorter than the window asked for', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
       - **Nothing before the page had loaded.** Capture began after this page had loaded, because its domain was added or the extension was installed while the tab was already open. Nothing emitted before that point exists; reload the page to cover a full load.
       - **Window shortened by storage pressure.** The window covered is shorter than the one requested: storage pressure forced the oldest entries out before the hour was up.
@@ -269,6 +277,7 @@ describe('a request that did not complete', () => {
       outcome: 'failed',
       durationMs: 12_004,
       error: 'net::ERR_CONNECTION_RESET',
+      provenance: 'webRequest',
       responseBody: RESPONSE_BODY_UNAVAILABLE,
     };
 
@@ -289,8 +298,8 @@ describe('a request that did not complete', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -312,6 +321,7 @@ describe('a request that did not complete', () => {
       url: 'https://example.com/stream',
       resourceType: 'xmlhttprequest',
       outcome: 'pending',
+      provenance: 'webRequest',
       responseBody: RESPONSE_BODY_UNAVAILABLE,
     };
 
@@ -332,8 +342,8 @@ describe('a request that did not complete', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -342,6 +352,96 @@ describe('a request that did not complete', () => {
       > 🔗 [\`https://example.com/stream\`](<https://example.com/stream>)  
       > 🕑 \`2026-08-07T09:26:00.000Z\` · 📄 \`xmlhttprequest\` · no response body"
     `);
+  });
+});
+
+describe('why a request carries no body', () => {
+  /**
+   * The state is what a reader acts on: an eviction is a buffer to raise, a filter a setting to
+   * widen, and a structural absence neither. So each one is worded apart, and the report never
+   * repeats one sentence over entries that have nothing in common.
+   */
+  it('states a different cause per entry rather than one sentence for all of them', () => {
+    const states: ResponseBodyState[] = [
+      'captured',
+      'truncated',
+      'evicted',
+      'unavailable',
+      'filtered',
+      'out-of-session',
+      'unfinished',
+    ];
+    const entries: CaptureEntry[] = states.map((responseBody, index) => ({
+      ...REQUEST,
+      timestamp: NOW - (states.length - index) * MINUTE,
+      requestId: `body-${responseBody}`,
+      url: `https://example.com/api/${responseBody}`,
+      responseBody,
+    }));
+
+    const metaLines = renderReport(bundle({ entries }))
+      .split('\n')
+      .filter((line) => line.includes('🕑'))
+      .map((line) => line.slice(line.lastIndexOf('·') + 2).trim());
+
+    expect(metaLines).toEqual([
+      'response body captured',
+      'response body truncated',
+      'response body evicted from the capture buffer',
+      'no response body',
+      'response body not requested',
+      'response body out of session reach',
+      'response body never delivered',
+    ]);
+    expect(new Set(metaLines).size).toBe(states.length);
+  });
+});
+
+describe('a response body the deep layer reached', () => {
+  function withBody(responseBody: ResponseBodyState, responseBodyText: string): CaptureEntry {
+    return { ...REQUEST, provenance: 'cdp', resourceType: 'XHR', responseBody, responseBodyText };
+  }
+
+  it('folds it under the response headers, at the end of the section', () => {
+    const rendered = renderReport(
+      bundle({ entries: [withBody('captured', '{"cart":{"total":22},"currency":"EUR"}')] }),
+    );
+
+    expect(rendered).toContain('<summary>Response body</summary>');
+    expect(rendered.indexOf('Response headers')).toBeLessThan(rendered.indexOf('Response body'));
+    // Reindented, because a minified payload is unreadable and reindenting changes nothing.
+    expect(rendered).toContain('"total": 22');
+  });
+
+  it('names the cut rather than calling a truncated payload malformed', () => {
+    const rendered = renderReport(bundle({ entries: [withBody('truncated', '[{"id":1},{"id":2}')] }));
+
+    expect(rendered).toContain('Response body — cut at the capture ceiling');
+    expect(rendered).not.toContain('malformed JSON');
+    expect(rendered).toContain('[{"id":1},{"id":2}');
+  });
+
+  it('passes a body that is not JSON through exactly as it arrived', () => {
+    const rendered = renderReport(bundle({ entries: [withBody('captured', '<!doctype html>\n<p>hi')] }));
+
+    expect(rendered).toContain('<!doctype html>\n<p>hi');
+    expect(rendered).not.toContain('malformed JSON');
+  });
+
+  it('says an empty body was empty instead of folding a block over nothing', () => {
+    const rendered = renderReport(bundle({ entries: [withBody('captured', '')] }));
+
+    expect(rendered).toContain('response body empty');
+    expect(rendered).not.toContain('Response body');
+  });
+
+  it('names no layer, because the state is what the reader can act on', () => {
+    const rendered = renderReport(
+      bundle({ entries: [withBody('captured', '{}'), { ...REQUEST, requestId: 'shallow' }] }),
+    );
+
+    expect(rendered).not.toContain('cdp');
+    expect(rendered).not.toContain('webRequest');
   });
 });
 
@@ -374,8 +474,8 @@ describe('a body the report cannot reformat', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -432,8 +532,8 @@ describe('what the capture had to cut', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 
@@ -472,8 +572,8 @@ describe('a subject the tab could not name', () => {
 
       ## What this report cannot show
 
-      - **No response bodies.** Response bodies are not included. Chrome exposes no response body to an observing extension, in any version, so their absence here says nothing about the responses themselves.
       - **No browser-generated messages.** Messages the browser generates itself are missing: CORS and CSP violations, mixed content, and failed resource loads. They are printed by the browser rather than routed through console.*, which is the only channel this capture can observe.
+      - **No response bodies without the deep layer.** Response bodies are not included: the deep capture layer was not running on this tab, and no other channel exposes a response body to an extension. Their absence here says nothing about the responses themselves. Arm the deep layer before reproducing to capture them.
 
       ## Timeline
 

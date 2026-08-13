@@ -6,6 +6,15 @@ import {
 } from '@vigie/contract';
 import { PanelRight } from 'lucide-react';
 
+import {
+  EMPTY_CDP_SESSION_STATE,
+  onCdpSessionStateChanged,
+  readCdpSessionState,
+  takeCaptureInterrupted,
+  type CdpSessionState,
+} from '@/capture/cdp/session-state';
+import { START_DEEP_LAYER_MESSAGE, STOP_DEEP_LAYER_MESSAGE } from '@/capture/cdp/session';
+import { currentDeepLayerSupport } from '@/capture/cdp/support';
 import { ConsentRequired } from '@/consent/ConsentRequired';
 import {
   isCapturePermitted,
@@ -22,8 +31,10 @@ import { hasHostAccess, onWatchedDomainsChanged, readWatchedDomains } from '@/st
 import { FLUSH_MESSAGE } from '@/storage/write';
 import { Button } from '@/ui/components/button';
 
+import { DeepLayerControl } from './DeepLayerControl';
 import { ExportButton } from './ExportButton';
 import { ExportFeedback } from './ExportFeedback';
+import { InterruptionNotice } from './InterruptionNotice';
 import { PopupHeader } from './PopupHeader';
 import { ScopeStatus } from './ScopeStatus';
 import { TabContextLine } from './TabContextLine';
@@ -32,9 +43,12 @@ import { resolveSubjectTab } from './subject-tab';
 import {
   IDLE_FEEDBACK,
   MS_PER_MINUTE,
+  deepLayerView,
   depthAvailability,
   downloadAcknowledgement,
   exportFailure,
+  interruptionNotice,
+  isDeepLayerFailure,
   resolveCurrentDepth,
   scopeStatus,
   tabContextLine,
@@ -70,6 +84,10 @@ export default function App() {
   const [rememberedDepth, setRememberedDepth] = useState<ExportDepthMinutes | null>(null);
   const [feedback, setFeedback] = useState<ExportFeedbackView>(IDLE_FEEDBACK);
   const [busy, setBusy] = useState(false);
+  const [cdpSession, setCdpSession] = useState<CdpSessionState>(EMPTY_CDP_SESSION_STATE);
+  const [deepLayerFailure, setDeepLayerFailure] = useState<string | null>(null);
+  const [interrupted, setInterrupted] = useState(false);
+  const noticeTaken = useRef(false);
 
   /**
    * Everything the surface renders, read in one pass.
@@ -127,6 +145,33 @@ export default function App() {
     return onConsentChanged(setConsent);
   }, []);
 
+  // The deep layer, read the same way and followed for the same reason: it is stopped from Chrome's
+  // banner, on a page, with this popup nowhere in the picture.
+  useEffect(() => {
+    void readCdpSessionState().then(setCdpSession);
+    return onCdpSessionStateChanged(setCdpSession);
+  }, []);
+
+  /**
+   * The interruption mark, read once and consumed by the reading.
+   *
+   * Not read at all while the agreement is missing: reading clears the mark, and clearing it behind
+   * the gate would spend the notice on a surface that does not show it — the user would accept the
+   * disclosure and never learn their capture had been cut. Without consent there was no capture to
+   * interrupt anyway.
+   *
+   * The ref is what makes "once" true under `React.StrictMode`, which mounts every effect twice in
+   * development (`popup/main.tsx:5`): the second run would read an already-cleared mark and the
+   * notice would never appear.
+   */
+  useEffect(() => {
+    if (consent === null || !isCapturePermitted(consent)) return;
+    if (noticeTaken.current) return;
+
+    noticeTaken.current = true;
+    void takeCaptureInterrupted().then(setInterrupted);
+  }, [consent]);
+
   useEffect(() => {
     void refresh();
 
@@ -158,6 +203,36 @@ export default function App() {
     void browser.tabs.create({
       url: browser.runtime.getURL(`/options.html?domain=${encodeURIComponent(domain)}`),
     });
+  }
+
+  /**
+   * Arming the deep layer, and stopping it.
+   *
+   * No permission is requested here. `debugger` is a required permission because Chrome grants it
+   * no other way — an optional declaration is dropped at load and every runtime request for it is
+   * refused (`capture/cdp/permission.ts:1`). The click therefore only carries an intent, and the
+   * banner the user is consenting to appears when the session attaches.
+   *
+   * The worker is asked to start rather than being started from here, because the sessions have to
+   * outlive this document — the popup closes on the next click anywhere. No state is read off the
+   * success either: the worker writes the session state, and the subscription above is what brings
+   * it back.
+   *
+   * Only the failure is read, and it is shown rather than swallowed — both the worker's own `{ error }`
+   * and a message that never reached it. A start that silently did nothing is what let a permission
+   * the browser was refusing outright look like a dead button.
+   */
+  function actOnDeepLayer(intent: 'start' | 'stop'): void {
+    const message = intent === 'stop' ? STOP_DEEP_LAYER_MESSAGE : START_DEEP_LAYER_MESSAGE;
+
+    setDeepLayerFailure(null);
+    void browser.runtime.sendMessage(message).then(
+      (answer: unknown) => {
+        const reason = isDeepLayerFailure(answer) ? answer.error : null;
+        if (reason !== null) setDeepLayerFailure(`Could not ${intent} it: ${reason}`);
+      },
+      (error: unknown) => setDeepLayerFailure(`Could not ${intent} it: ${String(error)}`),
+    );
   }
 
   /**
@@ -200,6 +275,15 @@ export default function App() {
   }
 
   const status = facts ? scopeStatus(facts) : null;
+  // Read at render time, not in an effect: the browser verdict is a property of the browser and
+  // never moves, and the click below cannot await anything before asking for the permission.
+  const deepLayer = deepLayerView({
+    support: currentDeepLayerSupport(),
+    armed: cdpSession.armed,
+    canceledByUser: cdpSession.canceledByUser,
+    attachedTabs: cdpSession.attachedTabs.length,
+  });
+  const notice = interruptionNotice(interrupted);
   const availability = depthAvailability(facts?.coveredMinutes ?? 0);
   const currentDepth = resolveCurrentDepth(rememberedDepth, availability);
   // Out of scope, the surface offers the one action that resolves it and nothing else: a depth
@@ -232,6 +316,11 @@ export default function App() {
     >
       <PopupHeader />
 
+      {/* First, and above the scope: it covers the whole capture window, while everything under it
+          covers this tab. The deep layer block further down says whether the capture is running
+          now, which is what lets this be read as a statement rather than as an alert. */}
+      {notice ? <InterruptionNotice notice={notice} /> : null}
+
       {status ? (
         <ScopeStatus status={status} onWatch={watchDomainFromPopup} />
       ) : (
@@ -239,6 +328,11 @@ export default function App() {
           Reading the scope of this tab…
         </p>
       )}
+
+      {/* Below the scope and above the export, because it is read in that order: what is being
+          captured, then how deeply, then what comes out. It does not depend on the subject tab —
+          the layer follows the watched perimeter, not the tab this popup happens to be over. */}
+      <DeepLayerControl view={deepLayer} failure={deepLayerFailure} onAct={actOnDeepLayer} />
 
       {exportable && facts ? (
         <>
